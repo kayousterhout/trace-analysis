@@ -228,9 +228,7 @@ class Analyzer:
         previous_id = id
 
   def analyze_for_speedup(self, relative_fetch_time): 
-    print " " 
-    print " " #printing lines to separate analysis of different fetch times
-    print "********* Analyzing for relative fetch time %s ************" % relative_fetch_time
+    print "\n \n ********* Analyzing for relative fetch time %s ************" % relative_fetch_time
     # Subtract the overlap! No issues with weird fetch subtraction here because
     # the overlapping stages, at least for 3b, aren't the ones with a shuffle.
     total_time = -self.overlap
