@@ -338,9 +338,9 @@ def main(argv):
   results_file = open("%s_improvements" % filename, "w")
 
   #speedup is how much faster a fetch is; 0.25 = 4x faster fetch, 0 = infinitely fast network
-  for speedup in [0, 0.25, 0.5, 0.75, 0.9]:
-    results = analyzer.analyze_for_speedup(speedup)
-    results_file.write("%s" % speedup)
+  for fetch_speedup_multiplier in [0, 0.25, 0.5, 0.75, 0.9]:
+    results = analyzer.analyze_for_speedup(fetch_speedup_multiplier)
+    results_file.write("%s" % fetch_speedup_multiplier)
     for result in results:
       results_file.write("\t%s" % result)
     results_file.write("\n")
