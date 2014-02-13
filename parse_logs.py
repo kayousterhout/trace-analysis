@@ -228,6 +228,8 @@ class Analyzer:
         previous_id = id
 
   def analyze_for_speedup(self, relative_fetch_time): 
+    print " " 
+    print " " #printing lines to separate analysis of different fetch times
     print "********* Analyzing for relative fetch time %s ************" % relative_fetch_time
     # Subtract the overlap! No issues with weird fetch subtraction here because
     # the overlapping stages, at least for 3b, aren't the ones with a shuffle.
@@ -248,16 +250,16 @@ class Analyzer:
 
     tasks_for_combined_stages = []
     for id, stage in self.stages.iteritems():
-      print "Stage", id, stage
+      print "STAGE", id, stage
       stage_run_time = stage.finish_time() - stage.start_time
       total_time += stage_run_time
-      print "Total time: ", stage.total_runtime(), "total w/o fetch:", stage.total_runtime_faster_fetch(relative_fetch_time), "Approx speedup: ", stage.total_runtime_faster_fetch(relative_fetch_time) * 1.0 / stage.total_runtime()
-      print ("Approximate runtime: %s, without fetch: %s, speedup: %s" %
+      print "Total time: ", stage.total_runtime(), ", total w/o fetch:", stage.total_runtime_faster_fetch(relative_fetch_time), ", Approx speedup: ", stage.total_runtime_faster_fetch(relative_fetch_time) * 1.0 / stage.total_runtime()
+      print ("Approximate runtime: %s, w/o fetch: %s, speedup: %s" %
         (stage.approximate_runtime(), stage.approximate_runtime_faster_fetch(relative_fetch_time),
          stage.approximate_runtime_faster_fetch(relative_fetch_time) * 1.0 / stage.approximate_runtime()))
       if stage.has_fetch:
         time_with_faster_fetch = stage.runtime_with_faster_fetch(relative_fetch_time) 
-        print ("Real run time: %s, without shuffle (no wave accounting): %s, Speedup: %s" %
+        print ("Real run time: %s, w/o shuffle (no wave accounting): %s, Speedup: %s" %
           (stage_run_time, time_with_faster_fetch, time_with_faster_fetch * 1.0 / stage_run_time))
         total_time_with_faster_fetch += time_with_faster_fetch
       else:
@@ -280,16 +282,16 @@ class Analyzer:
 
     print ("****************************************")
     speedup = total_time_with_faster_fetch * 1.0 / total_time
-    print ("Total time: %s, without shuffle (no wave accounting): %s, speedup: %s" %
+    print ("Total time: %s, w/o shuffle (no wave accounting): %s, speedup: %s" %
       (total_time, total_time_with_faster_fetch, speedup))
 
     approximate_speedup = approx_total_time_with_faster_fetch * 1.0 / approx_total_time
-    print ("Approx total: %s, without shuffle: %s, speedup %s" %
+    print ("Approx total: %s, w/o shuffle: %s, speedup %s" %
       (approx_total_time, approx_total_time_with_faster_fetch, approximate_speedup))
 
     simulated_speedup = (self.simulated_total_time_with_faster_fetch * 1.0 /
       self.simulated_total_time)
-    print ("Sim %s without shuffle %s speedup %s" %
+    print ("Simulated %s, w/o shuffle %s, speedup %s" %
       (self.simulated_total_time, self.simulated_total_time_with_faster_fetch, simulated_speedup))
 
     norm_stragglers_speedup = self.simulated_total_normalized_stragglers * 1.0 / self.simulated_total_time
@@ -337,6 +339,7 @@ def main(argv):
   analyzer = Analyzer(filename)
   results_file = open("%s_improvements" % filename, "w")
 
+  #speedup is how much faster a fetch is; 0.25 = 4x faster fetch, 0 = infinitely fast network
   for speedup in [0, 0.25, 0.5, 0.75, 0.9]:
     results = analyzer.analyze_for_speedup(speedup)
     results_file.write("%s" % speedup)
