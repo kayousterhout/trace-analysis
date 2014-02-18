@@ -58,7 +58,7 @@ class Simulation:
 
     original_tasks = []
     tasks_without_stragglers = []
-    tasks_without_stragglers_2 = []
+    tasks_without_non_net_stragglers = []
     # List of the average runtimes, for each of the stages.
     normalized_runtimes = []
     for tasks in tasks_lists:
@@ -73,13 +73,14 @@ class Simulation:
       avg_runtime = sum(runtimes) * 1.0 / len(runtimes)
       normalized_runtimes.extend([avg_runtime for t in tasks])
 
-      # Drop the tasks with the highest 5% of non-network runtime.
-      non_net_runtimes = [t.runtime_faster_fetch(relative_fetch_time) for t in tasks]
+      # Get the non-network part of the task runtime, and drop tasks with
+      # the highest 5% of non-network runtime.
+      non_net_runtimes = [t.runtime_faster_fetch(0) for t in tasks]
       non_net_runtimes.sort()
       # TODO: Better to RELACE the highest 95% with median runtime?
-      tasks_without_stragglers_2.extend(
+      tasks_without_non_net_stragglers.extend(
         [t for t in tasks
-         if (t.runtime_faster_fetch(relative_fetch_time)) <= get_percentile(non_net_runtimes, 0.95)])
+         if (t.runtime_faster_fetch(0)) <= get_percentile(non_net_runtimes, 0.95)])
 
     # Make a copy of tasks to pass to simulate, because simulate modifies the list.
     self.runtime = simulate(list(original_tasks), Task.runtime)
@@ -91,9 +92,9 @@ class Simulation:
     self.runtime_with_no_stragglers_and_no_fetch = simulate(
       list(tasks_without_stragglers), lambda x: x.runtime_faster_fetch(relative_fetch_time))
 
-    self.runtime_with_no_stragglers_2 = simulate(list(tasks_without_stragglers_2), Task.runtime)
-    self.runtime_with_no_stragglers_and_no_fetch_2 = simulate(
-      list(tasks_without_stragglers_2), lambda x: x.runtime_faster_fetch(relative_fetch_time))
+    self.runtime_with_no_non_net_stragglers = simulate(list(tasks_without_non_net_stragglers), Task.runtime)
+    self.runtime_with_no_non_net_stragglers_and_faster_fetch = simulate(
+      list(tasks_without_non_net_stragglers), lambda x: x.runtime_faster_fetch(relative_fetch_time))
 
 class Task:
   def __init__(self, start_time, fetch_wait, finish_time, remote_bytes_read):
@@ -243,7 +244,7 @@ class Analyzer:
     self.simulated_total_no_stragglers = 0
     self.simulated_total_no_stragglers_with_faster_fetch = 0
 
-    self.simulated_total_no_stragglers_2 = 0
+    self.simulated_total_no_non_net_stragglers = 0
     self.simulated_total_no_stragglers_no_fetch_2 = 0
 
     tasks_for_combined_stages = []
@@ -299,13 +300,13 @@ class Analyzer:
     print ("Speedup from normalizing stragglers: %s, no stragglers: %s, nostrag network imp: %s" %
       (norm_stragglers_speedup, no_stragglers_speedup, no_stragglers_no_shuffle_speedup))
 
-    print ("Simulated no straggers (method 2): %s, no straggers or fetch (meth 2): %s" %
-      (self.simulated_total_no_stragglers_2, self.simulated_total_no_stragglers_no_fetch_2))
+    print ("Simulated no non-network stragglers: %s, no straggers or fetch: %s" %
+      (self.simulated_total_no_non_net_stragglers, self.simulated_total_no_stragglers_no_fetch_2))
 
-    no_stragglers_speedup_2 = self.simulated_total_no_stragglers_2 * 1.0 / self.simulated_total_time
+    no_stragglers_speedup_2 = self.simulated_total_no_non_net_stragglers * 1.0 / self.simulated_total_time
     no_stragglers_no_shuffle_speedup_2 = (self.simulated_total_no_stragglers_no_fetch_2 * 1.0 /
-      self.simulated_total_no_stragglers_2)
-    print ("Speedup from normalizing stragglers 2: %s, network imp: %s" %
+      self.simulated_total_no_non_net_stragglers)
+    print ("Speedup from normalizing non-network stragglers: %s, network imp: %s" %
       (no_stragglers_speedup_2, no_stragglers_no_shuffle_speedup_2))
 
     return (relative_fetch_time, approximate_speedup, simulated_speedup,
@@ -327,10 +328,10 @@ class Analyzer:
     self.simulated_total_no_stragglers_with_faster_fetch += s.runtime_with_no_stragglers_and_no_fetch 
 
     print ("Simulated no stragglers 2: %s, no stragglers or fetch 2: %s, speedup: %s" %
-      (s.runtime_with_no_stragglers_2, s.runtime_with_no_stragglers_and_no_fetch_2,
-       s.runtime_with_no_stragglers_and_no_fetch_2 * 1.0 / s.runtime_with_no_stragglers_2))
-    self.simulated_total_no_stragglers_2 += s.runtime_with_no_stragglers_2
-    self.simulated_total_no_stragglers_no_fetch_2 += s.runtime_with_no_stragglers_and_no_fetch_2
+      (s.runtime_with_no_non_net_stragglers, s.runtime_with_no_non_net_stragglers_and_faster_fetch,
+       s.runtime_with_no_non_net_stragglers_and_faster_fetch * 1.0 / s.runtime_with_no_non_net_stragglers))
+    self.simulated_total_no_non_net_stragglers += s.runtime_with_no_non_net_stragglers
+    self.simulated_total_no_stragglers_no_fetch_2 += s.runtime_with_no_non_net_stragglers_and_faster_fetch
       
 def main(argv):
   filename = argv[0]
