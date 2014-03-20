@@ -34,6 +34,11 @@ class Task:
     # at whether if we subtracted the disk time, we there would be no fetch wait time.
     self.total_disk_read_time = 0
     self.first_fetch_start = -1
+    # (bytes, disk read time) for each fetch.
+    self.disk_times = []
+    # (bytes, network time) for each fetch. The network time is the total fetch time
+    # minus the disk read time.
+    self.network_times = []
     for fetch_info_str in items_dict["FETCH_INFOS"].split(";"):
       items_dict = {}
       if len(fetch_info_str) == 0:
@@ -41,6 +46,7 @@ class Task:
       for item in fetch_info_str.split(","):
         key, value = item.split(":")
         items_dict[key] = int(value)
+      transferred_bytes = items_dict["Bytes"]
       fetch_start = items_dict["Start"]
       if self.first_fetch_start == -1:
         self.first_fetch_start = fetch_start
@@ -51,7 +57,9 @@ class Task:
       disk_read_time = items_dict["DiskReadTime"]
       if disk_read_time > fetch_time:
         print "WARNING: Disk read time (%s) > fetch time (%s)" % (disk_read_time, fetch_time)
-      self.total_disk_read_time += items_dict["DiskReadTime"]
+      self.total_disk_read_time += disk_read_time
+      self.disk_times.append((transferred_bytes, disk_read_time))
+      self.network_times.append((transferred_bytes, fetch_time - disk_read_time))
 
   def log_verbose(self):
     if self.has_fetch:
@@ -82,6 +90,7 @@ class Task:
     # Consider the fraction time spent reading from disk to be the network speedup,
     # and compute the resulting finish time.
     fraction_time_disk = self.fraction_time_disk()
+    self.logger.debug("Fraction time task used for disk: %s" % fraction_time_disk)
     finish_faster_fetch = self.finish_time_faster_fetch(1 - fraction_time_disk)
 
     # Also subtract the entire local fetch time, which we'll assume was all spent reading

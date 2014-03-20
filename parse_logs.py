@@ -141,6 +141,43 @@ class Analyzer:
       lambda t: t.runtime(),
       lambda t: t.runtime_no_disk_for_shuffle())
 
+  def fraction_fetch_time_reading_from_disk(self):
+    total_time_fetching = sum([s.total_time_fetching() for s in self.stages.values()])
+    total_disk_read_time = sum([s.total_disk_read_time() for s in self.stages.values()])
+    return total_disk_read_time * 1.0 / total_time_fetching
+
+  def write_network_and_disk_times_scatter(self, prefix):
+    """ Writes data and gnuplot file for a disk/network throughput scatter plot."""
+    # Data file.
+    network_filename = "%s_network_times.scatter" % prefix
+    network_file = open(network_filename, "w")
+    network_file.write("KB\tTime\n")
+    disk_filename = "%s_disk_times.scatter" % prefix
+    disk_file = open(disk_filename, "w")
+    disk_file.write("KB\tTime\n")
+    for stage in self.stages.values():
+      for task in stage.tasks:
+        if not task.has_fetch:
+          continue
+        for b, time in task.network_times:
+          network_file.write("%s\t%s\n" % (b / 1024., time))
+        for b, time in task.disk_times:
+          disk_file.write("%s\t%s\n" % (b / 1024., time))
+    network_file.close()
+    disk_file.close()
+
+    # Write plot file.
+    scatter_base_file = open("scatter_base.gp", "r")
+    plot_file = open("%s_net_disk_scatter.gp" % prefix, "w")
+    for line in scatter_base_file:
+      plot_file.write(line)
+    scatter_base_file.close()
+    plot_file.write("set output \"%s_scatter.pdf\"\n" % prefix)
+    plot_file.write("plot \"%s\" using 1:2 with dots title \"Network\",\\\n" %
+      network_filename)
+    plot_file.write("\"%s\" using 1:2 with p title \"Disk\"\n" % disk_filename)
+    plot_file.close()
+
 def main(argv):
   log_level = argv[1]
   if log_level == "debug":
@@ -148,19 +185,23 @@ def main(argv):
   logging.basicConfig(level=logging.INFO)
   filename = argv[0]
   analyzer = Analyzer(filename)
-  results_file = open("%s_improvements" % filename, "w")
+
+  analyzer.write_network_and_disk_times_scatter(filename)
 
   # Compute the speedup for a fetch time of 1.0 as a sanity check!
   # relative_fetch_time is a multipler that describes how long the fetch took relative to how
   # long it took in the original trace.  For example, a relative_fetch_time of 0 is for
   # a network that shuffled data instantaneously, and a relative_fetch_time of 0.25
   # is for a 4x faster network.
-  for relative_fetch_time in [0, 0.25, 0.5, 0.75, 0.9, 1.0]:
+  results_file = open("%s_improvements" % filename, "w")
+  for relative_fetch_time in [0, 0.25, 0.5, 0.75, 0.9, 0.95, 1.0]:
     faster_fetch_speedup = analyzer.network_speedup(relative_fetch_time)
     print "Speedup from relative fetch of %s: %s" % (relative_fetch_time, faster_fetch_speedup)
     results_file.write("%s %s\n" % (relative_fetch_time, faster_fetch_speedup))
 
-  print "Fraction time waiting on network: %s" % analyzer.fraction_time_waiting_on_network()
+  print "\nFraction time waiting on network: %s" % analyzer.fraction_time_waiting_on_network()
+  print ("\nFraction of fetch time spent reading from disk: %s" %
+    analyzer.fraction_fetch_time_reading_from_disk())
   print "Speedup from eliminating disk: %s" % analyzer.disk_speedup()
 
 if __name__ == "__main__":

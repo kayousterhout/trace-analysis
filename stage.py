@@ -20,6 +20,12 @@ class Stage:
   def total_runtime_no_fetch(self):
     return sum([t.runtime_faster_fetch(0) for t in self.tasks])
 
+  def total_time_fetching(self):
+    return sum([t.total_time_fetching for t in self.tasks if t.has_fetch])
+
+  def total_disk_read_time(self):
+    return sum([t.total_disk_read_time for t in self.tasks if t.has_fetch])
+
   def add_event(self, line):
     if line.find("TASK_TYPE") == -1:
       return
