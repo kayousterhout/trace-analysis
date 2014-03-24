@@ -25,6 +25,7 @@ def get_percentile(N, percent, key=lambda x:x):
 
 class Analyzer:
   def __init__(self, filename):
+    self.logger = logging.getLogger("Analyzer")
     f = open(filename, "r")
     # Map of stage IDs to Stages.
     self.stages = collections.defaultdict(stage.Stage)
@@ -34,8 +35,6 @@ class Analyzer:
       if stage_id_loc != -1:
         stage_id_and_suffix = line[stage_id_loc + len(STAGE_ID_MARKER):]
         stage_id = stage_id_and_suffix[:stage_id_and_suffix.find(" ")]
-        # TODO: Remove this if not running query 3b in the benchmark! This is a hack to combine two
-        # stages that run concurrently.
         self.stages[stage_id].add_event(line)
 
     # Compute the amount of overlapped time between stages
@@ -59,6 +58,10 @@ class Analyzer:
       if finish > old_end:
         old_end = finish
         previous_id = id
+
+  def print_stage_info(self):
+    for id, stage in self.stages.iteritems():
+      print "STAGE %s: %s" % (id, stage.verbose_str())
 
   def print_heading(self, text):
     print "\n******** %s ********" % text
@@ -90,7 +93,6 @@ class Analyzer:
       tasks = sorted(unsorted_tasks, key = lambda task: task.start_time)
 
       # Get the runtime for the stage
-      # TODO: compare this to the original stage run time as a sanity check.
       task_runtimes = [compute_base_runtime(task) for task in tasks]
       base_runtime = simulate.simulate(task_runtimes)
       total_time[0] += base_runtime
@@ -111,6 +113,7 @@ class Analyzer:
       print "Combined stages", self.stages_to_combine
       add_tasks_to_totals(tasks_for_combined_stages)
 
+    print "Faster time: %s, base time: %s" % (total_faster_time[0], total_time[0])
     return total_faster_time[0] * 1.0 / total_time[0]
 
   def network_speedup(self, relative_fetch_time):
@@ -134,6 +137,14 @@ class Analyzer:
     assert(total_runtime == total_fetch_wait + total_runtime_no_fetch)
     return total_fetch_wait * 1.0 / total_runtime
 
+  def fraction_time_using_network(self):
+    total_network_time = 0
+    total_runtime = 0
+    for stage in self.stages.values():
+      total_network_time += sum([t.network_time() for t in stage.tasks])
+      total_runtime += sum([t.runtime() for t in stage.tasks])
+    return total_network_time * 1.0 / total_runtime
+
   def disk_speedup(self):
     """ Returns the speedup if all disk I/O time had been completely eliminated. """
     return self.calculate_speedup(
@@ -141,10 +152,70 @@ class Analyzer:
       lambda t: t.runtime(),
       lambda t: t.runtime_no_disk_for_shuffle())
 
+  def fraction_time_waiting_on_disk(self):
+    total_disk_wait_time = 0
+    total_runtime = 0
+    for stage in self.stages.values():
+      for task in stage.tasks:
+        total_disk_wait_time += (task.runtime() - task.runtime_no_disk_for_shuffle())
+        total_runtime += task.runtime()
+    return total_disk_wait_time * 1.0 / total_runtime
+
   def fraction_fetch_time_reading_from_disk(self):
     total_time_fetching = sum([s.total_time_fetching() for s in self.stages.values()])
     total_disk_read_time = sum([s.total_disk_read_time() for s in self.stages.values()])
     return total_disk_read_time * 1.0 / total_time_fetching
+
+  def no_compute_speedup(self):
+    """ Returns the time the job would have taken if all compute time had been eliminated. """
+    return self.calculate_speedup(
+      "Computing speedup with no compute", lambda t: t.runtime(), lambda t: t.runtime_no_compute())
+
+  def fraction_time_waiting_on_compute(self):
+    total_compute_wait_time = 0
+    total_runtime = 0
+    for stage in self.stages.values():
+      for task in stage.tasks:
+        total_compute_wait_time += (task.runtime() - task.runtime_no_compute())
+        total_runtime += task.runtime()
+    return total_compute_wait_time * 1.0 / total_runtime
+
+  def fraction_time_computing(self):
+    total_compute_time = 0
+    total_runtime = 0
+    for stage in self.stages.values():
+      for task in stage.tasks:
+        total_compute_time += task.compute_time()
+        total_runtime += task.runtime()
+    return total_compute_time * 1.0 / total_runtime
+
+  def fraction_time_gc(self):
+    total_gc_time = 0
+    total_runtime = 0
+    for stage in self.stages.values():
+      total_gc_time += sum([t.gc_time for t in stage.tasks])
+      total_runtime += sum([t.runtime() for t in stage.tasks])
+    return total_gc_time * 1.0 / total_runtime
+
+  def fraction_time_writing_to_disk(self):
+    """ Fraction of task time spent writing shuffle outputs to disk.
+    
+    Does not include time to spill data to disk (which is fine for now because that feature is
+    turned off by default nor the time to persist result data to disk (if that happens).
+    """ 
+    total_disk_write_time = 0
+    total_runtime = 0
+    for id, stage in self.stages.iteritems():
+      stage_disk_write_time = 0
+      stage_total_runtime = 0
+      for task in stage.tasks:
+        stage_disk_write_time += task.disk_time()
+        stage_total_runtime += task.runtime()
+      self.logger.debug("Stage %s: Disk write time: %s, total runtime: %s" %
+        (id, stage_disk_write_time, stage_total_runtime))
+      total_disk_write_time += stage_disk_write_time
+      total_runtime += stage_total_runtime
+    return total_disk_write_time * 1.0 / total_runtime
 
   def write_network_and_disk_times_scatter(self, prefix):
     """ Writes data and gnuplot file for a disk/network throughput scatter plot."""
@@ -186,6 +257,8 @@ def main(argv):
   filename = argv[0]
   analyzer = Analyzer(filename)
 
+  analyzer.print_stage_info()
+
   analyzer.write_network_and_disk_times_scatter(filename)
 
   # Compute the speedup for a fetch time of 1.0 as a sanity check!
@@ -200,9 +273,19 @@ def main(argv):
     results_file.write("%s %s\n" % (relative_fetch_time, faster_fetch_speedup))
 
   print "\nFraction time waiting on network: %s" % analyzer.fraction_time_waiting_on_network()
+  print "\nFraction time using network: %s" % analyzer.fraction_time_using_network()
   print ("\nFraction of fetch time spent reading from disk: %s" %
     analyzer.fraction_fetch_time_reading_from_disk())
   print "Speedup from eliminating disk: %s" % analyzer.disk_speedup()
+  print "Fraction time waiting on disk: %s" % analyzer.fraction_time_waiting_on_disk()
+  print("\nFraction of time spent writing shuffle output to disk: %s" %
+    analyzer.fraction_time_writing_to_disk())
+  print("\nFraction of time spent garbage collecting: %s" %
+    analyzer.fraction_time_gc())
+  print "\nSpeedup from eliminating compute: %s" % analyzer.no_compute_speedup()
+  print "\nFraction of time waiting on compute: %s" % analyzer.fraction_time_waiting_on_compute()
+  print("\nFraction of time computing: %s" %
+    analyzer.fraction_time_computing())
 
 if __name__ == "__main__":
   main(sys.argv[1:])

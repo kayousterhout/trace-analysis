@@ -6,7 +6,22 @@ class Stage:
     self.tasks = []
 
   def __str__(self):
-    return "%s tasks Start: %s, finish: %s" % (len(self.tasks), self.start_time, self.finish_time())
+    avg_task_runtime = sum([t.runtime() for t in self.tasks]) * 1.0 / len(self.tasks)
+    max_task_runtime = max([t.runtime() for t in self.tasks])
+    return ("%s tasks (avg runtime: %s, max runtime: %s) Start: %s, runtime: %s" %
+      (len(self.tasks), avg_task_runtime, max_task_runtime, self.start_time,
+       self.finish_time() - self.start_time))
+
+  def verbose_str(self):
+    # Get info about the longest task.
+    max_index = -1
+    max_runtime = -1
+    for i, task in enumerate(self.tasks):
+      if task.runtime() > max_runtime:
+        max_runtime = task.runtime()
+        max_index = i
+    return "%s\n    Longest Task: %s" % (self, self.tasks[i])
+    
 
   def finish_time(self):
     return max([t.finish_time for t in self.tasks])

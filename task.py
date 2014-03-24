@@ -14,6 +14,15 @@ class Task:
 
     self.start_time = int(items_dict["START_TIME"])
     self.finish_time = int(items_dict["FINISH_TIME"])
+    self.gc_time = int(items_dict["GC_TIME"])
+    self.executor_deserialize_time = int(items_dict["EXECUTOR_DESERIALIZE_TIME"])
+
+    self.shuffle_write_time = 0
+    SHUFFLE_WRITE_TIME_KEY = "SHUFFLE_WRITE_TIME"
+    if SHUFFLE_WRITE_TIME_KEY in items_dict:
+      # Convert to milliseconds (from nanoseconds).
+      self.shuffle_write_time = int(items_dict[SHUFFLE_WRITE_TIME_KEY]) / 1.0e6
+
     self.has_fetch = True
     if line.find("FETCH") < 0:
       self.has_fetch = False
@@ -54,14 +63,66 @@ class Task:
         self.first_fetch_start = min(fetch_start, self.first_fetch_start)
       fetch_time = items_dict["FetchProcessingEnd"] - fetch_start
       self.total_time_fetching += fetch_time
-      disk_read_time = items_dict["DiskReadTime"]
+      # Convert to milliseconds (from nanoseconds).
+      disk_read_time = items_dict["DiskReadTime"] / 1.0e6
       if disk_read_time > fetch_time:
         print "WARNING: Disk read time (%s) > fetch time (%s)" % (disk_read_time, fetch_time)
       self.total_disk_read_time += disk_read_time
       self.disk_times.append((transferred_bytes, disk_read_time))
       self.network_times.append((transferred_bytes, fetch_time - disk_read_time))
 
-  def log_verbose(self):
+  def network_time(self):
+    """ Returns the amount of time this task spent using the network.
+
+    This includes time where computation was parallelized with network.
+    """
+    if self.has_fetch:
+      return self.shuffle_finish_time - self.start_time - self.local_read_time
+    return 0
+
+  def compute_time(self):
+     """ Returns the time this task spent computing.
+     
+     Assumes shuffle writes don't get pipelined with task execution (TODO: verify this).
+     Does not include GC time.
+     """
+     compute_time = self.runtime() - self.gc_time - self.shuffle_write_time
+     if self.has_fetch:
+       # Subtract off of the time to read local data (which typically comes from disk) because
+       # this read happens before any of the computation starts.
+       compute_time = compute_time - self.fetch_wait - self.local_read_time
+     return compute_time
+
+  def runtime_no_compute(self):
+    """ Returns how long the task would have run for had it not done any computation. """
+    # Time the task spent reading data over the network or from disk for the shuffle.
+    # Computation happens during this time, but if the computation were infinitely fast,
+    # this phase wouldn't have sped up because it was ultimately waiting on the network.
+    # This is an approximation because tasks don't currently log the amount of time where
+    # the network is stopped, waiting for the computation to speed up.
+    # We're also approximating because there's some disk writing that happens in parallel
+    # via the OS buffer cache.  It's basically impossible for us to account for that so
+    # we ignore it.
+    # The final reason that this is an approximation is that the shuffle write time could overlap with
+    # the shuffle time (if a task is both reading shuffle inputs and writing shuffle outputs).
+    # We should be able to fix the logging to correct this issue.
+    compute_wait_time = self.finish_time - self.start_time - self.shuffle_write_time
+    if self.has_fetch:
+      shuffle_time = self.shuffle_finish_time - self.start_time
+      compute_wait_time = compute_wait_time - shuffle_time
+    return self.runtime() - compute_wait_time
+
+  def disk_time(self):
+    """ Returns the time writing shuffle output.
+
+    Ignores disk time taken to read shuffle input as part of a transfer over the network because in
+    the traces we've seen so far, it's a very small percentage of the network time.
+    """
+    if self.has_fetch:
+      return self.shuffle_write_time + self.local_read_time
+    return self.shuffle_write_time
+
+  def __str__(self):
     if self.has_fetch:
       base = self.start_time
       # Print times relative to the start time so that they're easier to read.
@@ -70,22 +131,28 @@ class Task:
              (self.start_time, self.local_read_time, self.first_fetch_start - base,
               self.shuffle_finish_time - base, self.finish_time - base, self.fraction_time_disk())) 
     else:
-      desc = "Start time: %s, finish: %s" % (self.start_time, self.finish_time)
-    self.logger.debug(desc)
+      desc = ("Start time: %s, finish: %s, shuffle write time: %s" %
+        (self.start_time, self.finish_time, self.shuffle_write_time))
+    return desc
+
+  def log_verbose(self):
+    self.logger.debug(str(self))
 
   def runtime(self):
     return self.finish_time - self.start_time
 
   def fraction_time_disk(self):
     """ Should only be called for tasks with a fetch phase. """
+    if self.total_disk_read_time == 0:
+      return 0
     return self.total_disk_read_time * 1.0 / self.total_time_fetching
 
   def finish_time_no_disk_for_shuffle(self):
-    """ Returns the task finish time if the shuffle data hadn't been read from disk.
+    """ Returns the task finish time if the shuffle data hadn't been written to or read from disk.
 
     This method relies on the finish_time_faster_fetch method and is thus also approximate. """
     if not self.has_fetch:
-      return self.finish_time
+      return self.finish_time - self.shuffle_write_time
 
     # Consider the fraction time spent reading from disk to be the network speedup,
     # and compute the resulting finish time.
@@ -95,10 +162,14 @@ class Task:
 
     # Also subtract the entire local fetch time, which we'll assume was all spent reading
     # data from disk.
-    return finish_faster_fetch - self.local_read_time
+    return finish_faster_fetch - self.local_read_time - self.shuffle_write_time
 
   def runtime_no_disk_for_shuffle(self):
-    return self.finish_time_no_disk_for_shuffle() - self.start_time
+    new_runtime = self.finish_time_no_disk_for_shuffle() - self.start_time
+    self.logger.debug(new_runtime)
+    speedup = new_runtime * 1.0 / self.runtime()
+    self.logger.debug("Speedup from eliminating disk: %s" % speedup)
+    return new_runtime
 
   def finish_time_faster_fetch(self, relative_fetch_time):
     """ Returns the finish time of the job if the fetch had completed faster.
