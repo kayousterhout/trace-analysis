@@ -197,8 +197,8 @@ class Analyzer:
       total_runtime += sum([t.runtime() for t in stage.tasks])
     return total_gc_time * 1.0 / total_runtime
 
-  def fraction_time_writing_to_disk(self):
-    """ Fraction of task time spent writing shuffle outputs to disk.
+  def fraction_time_using_disk(self):
+    """ Fraction of task time spent writing shuffle outputs to disk and reading them back.
     
     Does not include time to spill data to disk (which is fine for now because that feature is
     turned off by default nor the time to persist result data to disk (if that happens).
@@ -250,6 +250,10 @@ class Analyzer:
     plot_file.close()
 
 def main(argv):
+  if len(argv) < 2:
+    print "Usage: python parse_logs.py <log filename> <debug level> <(OPT) agg. results filename>"
+    sys.exit()
+
   log_level = argv[1]
   if log_level == "debug":
     logging.basicConfig(level=logging.DEBUG)
@@ -267,25 +271,46 @@ def main(argv):
   # a network that shuffled data instantaneously, and a relative_fetch_time of 0.25
   # is for a 4x faster network.
   results_file = open("%s_improvements" % filename, "w")
+  no_network_speedup = -1
   for relative_fetch_time in [0, 0.25, 0.5, 0.75, 0.9, 0.95, 1.0]:
     faster_fetch_speedup = analyzer.network_speedup(relative_fetch_time)
     print "Speedup from relative fetch of %s: %s" % (relative_fetch_time, faster_fetch_speedup)
+    if relative_fetch_time == 0:
+      no_network_speedup = faster_fetch_speedup
     results_file.write("%s %s\n" % (relative_fetch_time, faster_fetch_speedup))
 
-  print "\nFraction time waiting on network: %s" % analyzer.fraction_time_waiting_on_network()
-  print "\nFraction time using network: %s" % analyzer.fraction_time_using_network()
+  fraction_time_waiting_on_network = analyzer.fraction_time_waiting_on_network()
+  print "\nFraction time waiting on network: %s" % fraction_time_waiting_on_network
+  fraction_time_using_network = analyzer.fraction_time_using_network()
+  print "\nFraction time using network: %s" % fraction_time_using_network
   print ("\nFraction of fetch time spent reading from disk: %s" %
     analyzer.fraction_fetch_time_reading_from_disk())
-  print "Speedup from eliminating disk: %s" % analyzer.disk_speedup()
-  print "Fraction time waiting on disk: %s" % analyzer.fraction_time_waiting_on_disk()
-  print("\nFraction of time spent writing shuffle output to disk: %s" %
-    analyzer.fraction_time_writing_to_disk())
+  no_disk_speedup = analyzer.disk_speedup()
+  print "Speedup from eliminating disk: %s" % no_disk_speedup
+  fraction_time_waiting_on_disk = analyzer.fraction_time_waiting_on_disk()
+  print "Fraction time waiting on disk: %s" % fraction_time_waiting_on_disk
+  fraction_time_using_disk = analyzer.fraction_time_using_disk()
+  print("\nFraction of time spent writing/reading shuffle data to/from disk: %s" %
+    fraction_time_using_disk)
   print("\nFraction of time spent garbage collecting: %s" %
     analyzer.fraction_time_gc())
-  print "\nSpeedup from eliminating compute: %s" % analyzer.no_compute_speedup()
-  print "\nFraction of time waiting on compute: %s" % analyzer.fraction_time_waiting_on_compute()
-  print("\nFraction of time computing: %s" %
-    analyzer.fraction_time_computing())
+  no_compute_speedup = analyzer.no_compute_speedup()
+  print "\nSpeedup from eliminating compute: %s" % no_compute_speedup
+  fraction_time_waiting_on_compute = analyzer.fraction_time_waiting_on_compute()
+  print "\nFraction of time waiting on compute: %s" % fraction_time_waiting_on_compute
+  fraction_time_computing = analyzer.fraction_time_computing()
+  print "\nFraction of time computing: %s" % fraction_time_computing
+
+  if len(argv) > 2:
+    agg_results_filename = argv[2]
+    print "Adding results to %s" % agg_results_filename
+    f = open(agg_results_filename, "a")
+    f.write("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (
+      filename.split("/")[1].split("_")[0],
+      no_network_speedup, fraction_time_waiting_on_network, fraction_time_using_network,
+      no_disk_speedup, fraction_time_waiting_on_disk, fraction_time_using_disk,
+      no_compute_speedup, fraction_time_waiting_on_compute, fraction_time_computing))
+    f.close()
 
 if __name__ == "__main__":
   main(sys.argv[1:])
