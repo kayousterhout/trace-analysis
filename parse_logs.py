@@ -66,6 +66,94 @@ class Analyzer:
   def print_heading(self, text):
     print "\n******** %s ********" % text
 
+  def get_simulated_runtime(self):
+    """ Returns the simulated runtime for the job.
+
+    This should be approximately the same as the original runtime of the job, except
+    that it doesn't include scheduler delay.
+    """
+    total_runtime = 0
+    tasks_for_combined_stages = []
+    for id, stage in self.stages.iteritems():
+      if id in self.stages_to_combine:
+        tasks_for_combined_stages.extend(stage.tasks)
+      else:
+        tasks = sorted(stage.tasks, key = lambda task: task.start_time)
+        total_runtime += simulate.simulate([task.runtime() for task in tasks])
+    if len(tasks_for_combined_stages) > 0:
+      tasks = sorted(tasks_for_combined_stages, key = lambda task: task.start_time)
+      total_runtime += simulate.simulate([task.runtime() for task in tasks])
+    return total_runtime 
+
+  def no_stragglers_using_average_runtime_speedup(self):
+    """ Returns how much faster the job would have run if there were no stragglers.
+
+    Eliminates stragglers by replacing each task's runtime with the average runtime
+    for tasks in the job.
+    """
+    self.print_heading("Computing speedup by averaging out stragglers")
+    total_no_stragglers_runtime = 0
+    averaged_runtimes_for_combined_stages = []
+    for id, stage in self.stages.iteritems():
+      averaged_runtimes = [stage.average_task_runtime()] * len(stage.tasks)
+      if id in self.stages_to_combine:
+        averaged_runtimes_for_combined_stages.extend(averaged_runtimes) 
+      else:
+        total_no_stragglers_runtime += simulate.simulate(averaged_runtimes)
+    if len(averaged_runtimes_for_combined_stages) > 0:
+      total_no_stragglers_runtime += simulate.simulate(averaged_runtimes_for_combined_stages)
+    return total_no_stragglers_runtime * 1.0 / self.get_simulated_runtime()
+
+  def replace_95_stragglers_with_median_speedup(self):
+    """ Returns how much faster the job would have run if there were no stragglers.
+
+    Removes stragglers by replacing the longest 5% of tasks with the median runtime
+    for tasks in the stage.
+    """
+    total_no_stragglers_runtime = 0
+    runtimes_for_combined_stages = []
+    for id, stage in self.stages.iteritems():
+      runtimes = [task.runtime() for task in stage.tasks]
+      runtimes.sort()
+      median_runtime = get_percentile(runtimes, 0.5)
+      threshold_runtime = get_percentile(runtimes, 0.95)
+      no_straggler_runtimes = []
+      for runtime in runtimes:
+        if runtime >= threshold_runtime:
+          no_straggler_runtimes.append(median_runtime)
+        else:
+          no_straggler_runtimes.append(runtime)
+      if id in self.stages_to_combine:
+        runtimes_for_combined_stages.extend(runtimes)
+      else:
+        total_no_stragglers_runtime += simulate.simulate(no_straggler_runtimes)
+    return total_no_stragglers_runtime * 1.0 / self.get_simulated_runtime()
+
+
+  def replace_stragglers_with_median_speedup(self):
+    """ Returns how much faster the job would have run if there were no stragglers.
+
+    Removes stragglers by replacing tasks that took more than 50% longer than the median
+    with the median runtime for tasks in the stage.
+    """
+    total_no_stragglers_runtime = 0
+    runtimes_for_combined_stages = []
+    for id, stage in self.stages.iteritems():
+      runtimes = [task.runtime() for task in stage.tasks]
+      runtimes.sort()
+      median_runtime = get_percentile(runtimes, 0.5)
+      no_straggler_runtimes = []
+      for runtime in runtimes:
+        if runtime > 1.5 * median_runtime:
+          no_straggler_runtimes.append(median_runtime)
+        else:
+          no_straggler_runtimes.append(runtime)
+      if id in self.stages_to_combine:
+        runtimes_for_combined_stages.extend(runtimes)
+      else:
+        total_no_stragglers_runtime += simulate.simulate(no_straggler_runtimes)
+    return total_no_stragglers_runtime * 1.0 / self.get_simulated_runtime()
+
   def calculate_speedup(self, description, compute_base_runtime, compute_faster_runtime):
     """ Returns how much faster the job would have run if each task had a faster runtime.
 
@@ -300,16 +388,26 @@ def main(argv):
   print "\nFraction of time waiting on compute: %s" % fraction_time_waiting_on_compute
   fraction_time_computing = analyzer.fraction_time_computing()
   print "\nFraction of time computing: %s" % fraction_time_computing
+  
+  no_stragglers_average_runtime_speedup = analyzer.no_stragglers_using_average_runtime_speedup()
+  no_stragglers_replace_with_median_speedup = analyzer.replace_stragglers_with_median_speedup()
+  no_stragglers_replace_95_with_median_speedup = \
+    analyzer.replace_95_stragglers_with_median_speedup()
+  print ("\nSpeedup from eliminating stragglers: %s (use average) %s (1.5=>med) %s (95%%ile=>med)" %
+    (no_stragglers_average_runtime_speedup, no_stragglers_replace_with_median_speedup,
+     no_stragglers_replace_95_with_median_speedup))
 
   if len(argv) > 2:
     agg_results_filename = argv[2]
     print "Adding results to %s" % agg_results_filename
     f = open(agg_results_filename, "a")
-    f.write("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (
+    f.write("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (
       filename.split("/")[1].split("_")[0],
       no_network_speedup, fraction_time_waiting_on_network, fraction_time_using_network,
       no_disk_speedup, fraction_time_waiting_on_disk, fraction_time_using_disk,
-      no_compute_speedup, fraction_time_waiting_on_compute, fraction_time_computing))
+      no_compute_speedup, fraction_time_waiting_on_compute, fraction_time_computing,
+      no_stragglers_average_runtime_speedup, no_stragglers_replace_with_median_speedup,
+      no_stragglers_replace_95_with_median_speedup))
     f.close()
 
 if __name__ == "__main__":

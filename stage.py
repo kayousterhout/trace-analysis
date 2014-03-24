@@ -5,11 +5,13 @@ class Stage:
     self.start_time = -1
     self.tasks = []
 
+  def average_task_runtime(self):
+    return sum([t.runtime() for t in self.tasks]) * 1.0 / len(self.tasks)
+
   def __str__(self):
-    avg_task_runtime = sum([t.runtime() for t in self.tasks]) * 1.0 / len(self.tasks)
     max_task_runtime = max([t.runtime() for t in self.tasks])
     return ("%s tasks (avg runtime: %s, max runtime: %s) Start: %s, runtime: %s" %
-      (len(self.tasks), avg_task_runtime, max_task_runtime, self.start_time,
+      (len(self.tasks), self.average_task_runtime(), max_task_runtime, self.start_time,
        self.finish_time() - self.start_time))
 
   def verbose_str(self):
