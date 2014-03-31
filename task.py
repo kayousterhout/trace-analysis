@@ -127,12 +127,15 @@ class Task:
       base = self.start_time
       # Print times relative to the start time so that they're easier to read.
       desc = (("Start time: %s, local read time: %s, first fetch start: %s, shuffle finish: %s, " +
-            "finish: %s, fraction disk time: %s") %
+            "fetch wait: %s, compute time: %s, gc time: %s, shuffle write time: %s, finish: %s, " +
+            "fraction disk time: %s") %
              (self.start_time, self.local_read_time, self.first_fetch_start - base,
-              self.shuffle_finish_time - base, self.finish_time - base, self.fraction_time_disk())) 
+              self.shuffle_finish_time - base, self.fetch_wait, self.gc_time,
+              self.compute_time(), self.shuffle_write_time, self.finish_time - base,
+              self.fraction_time_disk())) 
     else:
-      desc = ("Start time: %s, finish: %s, shuffle write time: %s" %
-        (self.start_time, self.finish_time, self.shuffle_write_time))
+      desc = ("Start time: %s, finish: %s, gc time: %s, shuffle write time: %s" %
+        (self.start_time, self.finish_time, self.gc_time, self.shuffle_write_time))
     return desc
 
   def log_verbose(self):

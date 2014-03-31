@@ -337,6 +337,63 @@ class Analyzer:
     plot_file.write("\"%s\" using 1:2 with p title \"Disk\"\n" % disk_filename)
     plot_file.close()
 
+  def write_waterfall(self, prefix):
+    """ Outputs a gnuplot file that visually shows all task runtimes. """
+    all_tasks = []
+    cumulative_tasks = 0
+    stage_cumulative_tasks = []
+    for stage in sorted(self.stages.values(), key = lambda x: x.start_time):
+      all_tasks.extend(sorted(stage.tasks, key = lambda x: x.start_time))
+      cumulative_tasks = cumulative_tasks + len(stage.tasks)
+      stage_cumulative_tasks.append(str(cumulative_tasks))
+
+    base_file = open("waterfall_base.gp", "r")
+    plot_file = open("%s_waterfall.gp" % prefix, "w")
+    for line in base_file:
+      plot_file.write(line)
+    base_file.close()
+
+    LINE_TEMPLATE = "set arrow from %s,%s to %s,%s ls %s nohead\n"
+
+    # Write all time relative to the first start time so the graph is easier to read.
+    first_start = all_tasks[0].start_time
+    for i, task in enumerate(all_tasks):
+      start = task.start_time - first_start
+      local_read_end = start
+      fetch_wait_end = start
+      if task.has_fetch:
+        local_read_end = start + task.local_read_time
+        fetch_wait_end = local_read_end + task.fetch_wait
+      compute_end = fetch_wait_end + task.compute_time()
+      gc_end = compute_end + task.gc_time
+      task_end = gc_end + task.shuffle_write_time
+      if math.fabs((first_start + task_end) - task.finish_time) >= 0.1:
+        print "Mismatch at index %s" % i
+        print task
+        assert False
+
+      # Write data to plot file.
+      if task.has_fetch:
+        plot_file.write(LINE_TEMPLATE % (start, i, local_read_end, i, 1))
+        plot_file.write(LINE_TEMPLATE % (local_read_end, i, fetch_wait_end, i, 2))
+        plot_file.write(LINE_TEMPLATE % (fetch_wait_end, i, compute_end, i, 3))
+      else:
+        plot_file.write(LINE_TEMPLATE % (start, i, compute_end, i, 3))
+      plot_file.write(LINE_TEMPLATE % (compute_end, i, gc_end, i, 4))
+      plot_file.write(LINE_TEMPLATE % (gc_end, i, task_end, i, 5))
+
+    last_end = all_tasks[-1].finish_time
+    ytics_str = ",".join(stage_cumulative_tasks)
+    plot_file.write("set ytics (%s)\n" % ytics_str)
+    plot_file.write("set xrange [0:%s]\n" % (last_end - first_start))
+    plot_file.write("set yrange [0:%s]\n" % len(all_tasks))
+    plot_file.write("set output \"%s_waterfall.pdf\"\n" % prefix)
+
+    # Hacky way to force a key to be printed.
+    plot_file.write("plot -1 ls 1 title 'Local read wait', -1 ls 2 title 'Network wait', \\\n")
+    plot_file.write("-1 ls 3 title 'Compute', -1 ls 4 title 'GC', -1 ls 5 title 'Disk write wait'")
+    plot_file.close()
+
 def main(argv):
   if len(argv) < 2:
     print "Usage: python parse_logs.py <log filename> <debug level> <(OPT) agg. results filename>"
@@ -352,6 +409,8 @@ def main(argv):
   analyzer.print_stage_info()
 
   analyzer.write_network_and_disk_times_scatter(filename)
+  
+  analyzer.write_waterfall(filename)
 
   # Compute the speedup for a fetch time of 1.0 as a sanity check!
   # relative_fetch_time is a multipler that describes how long the fetch took relative to how
