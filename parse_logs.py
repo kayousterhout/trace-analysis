@@ -204,6 +204,16 @@ class Analyzer:
     print "Faster time: %s, base time: %s" % (total_faster_time[0], total_time[0])
     return total_faster_time[0] * 1.0 / total_time[0]
 
+  def fraction_time_scheduler_delay(self):
+    """ Of the total time spent across all machines in the cluster, what fraction of time was
+    spent waiting on the scheduler?"""
+    total_scheduler_delay = 0
+    total_runtime = 0
+    for id, stage in self.stages.iteritems():
+      total_scheduler_delay += sum([t.scheduler_delay for t in stage.tasks])
+      total_runtime += stage.total_runtime()
+    return total_scheduler_delay * 1.0 / total_runtime
+
   def network_speedup(self, relative_fetch_time):
     return self.calculate_speedup(
       "Computing speedup with %s relative fetch time" % relative_fetch_time,
@@ -211,7 +221,7 @@ class Analyzer:
       lambda t: t.runtime_faster_fetch(relative_fetch_time))
 
   def fraction_time_waiting_on_network(self):
-    """ Of the total time spent across all machines in the network, what fraction of time was
+    """ Of the total time spent across all machines in the cluster, what fraction of time was
     spent waiting on the network? """
     total_fetch_wait = 0
     # This is just used as a sanity check: total_runtime_no_fetch + total_fetch_wait
@@ -359,10 +369,12 @@ class Analyzer:
     first_start = all_tasks[0].start_time
     for i, task in enumerate(all_tasks):
       start = task.start_time - first_start
-      local_read_end = start
-      fetch_wait_end = start
+      # Show the scheduler delay at the beginning -- but it could be at the beginning or end or split.
+      scheduler_delay_end = start + task.scheduler_delay
+      local_read_end = scheduler_delay_end
+      fetch_wait_end = scheduler_delay_end
       if task.has_fetch:
-        local_read_end = start + task.local_read_time
+        local_read_end = scheduler_delay_end + task.local_read_time
         fetch_wait_end = local_read_end + task.fetch_wait
       compute_end = fetch_wait_end + task.compute_time()
       gc_end = compute_end + task.gc_time
@@ -373,12 +385,13 @@ class Analyzer:
         assert False
 
       # Write data to plot file.
+      plot_file.write(LINE_TEMPLATE % (start, i, scheduler_delay_end, i, 6))
       if task.has_fetch:
-        plot_file.write(LINE_TEMPLATE % (start, i, local_read_end, i, 1))
+        plot_file.write(LINE_TEMPLATE % (scheduler_delay_end, i, local_read_end, i, 1))
         plot_file.write(LINE_TEMPLATE % (local_read_end, i, fetch_wait_end, i, 2))
         plot_file.write(LINE_TEMPLATE % (fetch_wait_end, i, compute_end, i, 3))
       else:
-        plot_file.write(LINE_TEMPLATE % (start, i, compute_end, i, 3))
+        plot_file.write(LINE_TEMPLATE % (scheduler_delay_end, i, compute_end, i, 3))
       plot_file.write(LINE_TEMPLATE % (compute_end, i, gc_end, i, 4))
       plot_file.write(LINE_TEMPLATE % (gc_end, i, task_end, i, 5))
 
@@ -390,8 +403,9 @@ class Analyzer:
     plot_file.write("set output \"%s_waterfall.pdf\"\n" % prefix)
 
     # Hacky way to force a key to be printed.
-    plot_file.write("plot -1 ls 1 title 'Local read wait', -1 ls 2 title 'Network wait', \\\n")
-    plot_file.write("-1 ls 3 title 'Compute', -1 ls 4 title 'GC', -1 ls 5 title 'Disk write wait'")
+    plot_file.write("plot -1 ls 6 title 'Scheduler delay', -1 ls 1 title 'Local read wait',\\\n")
+    plot_file.write("-1 ls 2 title 'Network wait', -1 ls 3 title 'Compute', \\\n")
+    plot_file.write("-1 ls 4 title 'GC', -1 ls 5 title 'Disk write wait'\\\n")
     plot_file.close()
 
 def main(argv):
@@ -426,6 +440,8 @@ def main(argv):
       no_network_speedup = faster_fetch_speedup
     results_file.write("%s %s\n" % (relative_fetch_time, faster_fetch_speedup))
 
+  fraction_time_scheduler_delay = analyzer.fraction_time_scheduler_delay()
+  print ("\nFraction time scheduler delay: %s" % fraction_time_scheduler_delay)
   fraction_time_waiting_on_network = analyzer.fraction_time_waiting_on_network()
   print "\nFraction time waiting on network: %s" % fraction_time_waiting_on_network
   fraction_time_using_network = analyzer.fraction_time_using_network()

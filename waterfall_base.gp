@@ -20,14 +20,8 @@ set style line 2 lt rgb "#8da0cb" lw 1 pt 6
 set style line 3 lt rgb "#e78ac3" lw 1 pt 2
 set style line 4 lt rgb "#a6d854" lw 1 pt 3
 set style line 5 lt rgb "#66c2a5" lw 1 pt 4
+set style line 6 lt rgb "#ffd92f" lw 1 pt 5
 
 set xlabel "Time (ms)" offset 0,0.5
 set key above
-set output "tasks_time.pdf"
-
-set arrow from 1,1 to 3,1 ls 1 nohead
-set arrow from 3,1 to 6,1 ls 2 nohead
-set arrow from 6,1 to 8,1 ls 3 nohead
-set arrow from 8,1 to 11,1 ls 4 nohead
-set arrow from 11,1 to 13,1 ls 5 nohead
 
