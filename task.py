@@ -20,10 +20,12 @@ class Task:
     self.executor_deserialize_time = int(items_dict["EXECUTOR_DESERIALIZE_TIME"])
 
     self.shuffle_write_time = 0
+    self.shuffle_mb_written = 0
     SHUFFLE_WRITE_TIME_KEY = "SHUFFLE_WRITE_TIME"
     if SHUFFLE_WRITE_TIME_KEY in items_dict:
       # Convert to milliseconds (from nanoseconds).
       self.shuffle_write_time = int(items_dict[SHUFFLE_WRITE_TIME_KEY]) / 1.0e6
+      self.shuffle_mb_written = int(items_dict["SHUFFLE_BYTES_WRITTEN"]) / 1048576.
 
     self.has_fetch = True
     if line.find("FETCH") < 0:

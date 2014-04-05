@@ -12,16 +12,24 @@ import task
 Assumes N is sorted.
 """
 def get_percentile(N, percent, key=lambda x:x):
-    if not N:
-        return 0
-    k = (len(N) - 1) * percent
-    f = math.floor(k)
-    c = math.ceil(k)
-    if f == c:
-        return key(N[int(k)])
-    d0 = key(N[int(f)]) * (c-k)
-    d1 = key(N[int(c)]) * (k-f)
-    return d0 + d1
+  if not N:
+    return 0
+  k = (len(N) - 1) * percent
+  f = math.floor(k)
+  c = math.ceil(k)
+  if f == c:
+    return key(N[int(k)])
+  d0 = key(N[int(f)]) * (c-k)
+  d1 = key(N[int(c)]) * (k-f)
+  return d0 + d1
+
+def write_cdf(values, filename):
+  values.sort()
+  f = open(filename, "w")
+  for percent in range(100):
+    fraction = percent / 100.
+    f.write("%s\t%s\n" % (fraction, get_percentile(values, fraction)))
+  f.close()
 
 class Analyzer:
   def __init__(self, filename):
@@ -58,6 +66,10 @@ class Analyzer:
       if finish > old_end:
         old_end = finish
         previous_id = id
+
+  def all_tasks(self):
+    """ Returns a list of all tasks. """
+    return [task for stage in self.stages.values() for task in stage.tasks]
 
   def print_stage_info(self):
     for id, stage in self.stages.iteritems():
@@ -316,7 +328,9 @@ class Analyzer:
     return total_disk_write_time * 1.0 / total_runtime
 
   def write_network_and_disk_times_scatter(self, prefix):
-    """ Writes data and gnuplot file for a disk/network throughput scatter plot."""
+    """ Writes data and gnuplot file for a disk/network throughput scatter plot.
+    
+    Writes each individual transfer, so there are multiple data points for each task. """
     # Data file.
     network_filename = "%s_network_times.scatter" % prefix
     network_file = open(network_filename, "w")
@@ -345,6 +359,26 @@ class Analyzer:
     plot_file.write("plot \"%s\" using 1:2 with dots title \"Network\",\\\n" %
       network_filename)
     plot_file.write("\"%s\" using 1:2 with p title \"Disk\"\n" % disk_filename)
+    plot_file.close()
+
+  def write_task_write_times_scatter(self, prefix):
+    filename = "%s_task_write_times.scatter" % prefix
+    scatter_file = open(filename, "w")
+    scatter_file.write("MB\tTime\n")
+    for task in self.all_tasks():
+      if task.shuffle_mb_written > 0:
+        scatter_file.write("%s\t%s\n" % (task.shuffle_mb_written, task.shuffle_write_time))
+    scatter_file.close()
+
+    # Write plot file.
+    scatter_base_file = open("scatter_base.gp", "r")
+    plot_file = open("%s_task_write_scatter.gp" % prefix, "w")
+    for line in scatter_base_file:
+      plot_file.write(line)
+    scatter_base_file.close()
+    plot_file.write("set xlabel \"Data (MB)\"\n")
+    plot_file.write("set output \"%s_task_write_scatter.pdf\"\n" % prefix)
+    plot_file.write("plot \"%s\" using 1:2 with dots title \"Disk Write\"\n" % filename)
     plot_file.close()
 
   def write_waterfall(self, prefix):
@@ -408,6 +442,20 @@ class Analyzer:
     plot_file.write("-1 ls 4 title 'GC', -1 ls 5 title 'Disk write wait'\\\n")
     plot_file.close()
 
+  def make_cdfs_for_performance_model(self, prefix):
+    """ Writes plot files to create CDFS of the compute / network / disk rate. """
+    all_tasks = self.all_tasks()
+# TODO: Right now we don't record the input data size if it's read locally / not from
+# a shuffle?!?!?!?!?!?!?!????
+    compute_rates = [task.compute_time() * 1.0 / task.input_data for task in all_tasks]
+    write_cdf(compute_rates, "%s_compute_rate_cdf" % prefix)
+    
+    network_rates = [task.compute_time() * 1.0 / task.input_data for task in all_tasks]
+    write_cdf(network_rates, "%s_network_rate_cdf" % prefix)
+
+    write_rates = [task.shuffle_write_time * 1.0 / task.shuffle_mb_written for task in all_tasks]
+    write_cdf(write_rates, "%s_write_rate_cdf" % prefix)
+
 def main(argv):
   if len(argv) < 2:
     print "Usage: python parse_logs.py <log filename> <debug level> <(OPT) agg. results filename>"
@@ -421,6 +469,10 @@ def main(argv):
   analyzer = Analyzer(filename)
 
   analyzer.print_stage_info()
+
+  analyzer.write_task_write_times_scatter(filename)
+
+  #analyzer.make_cdfs_for_performance_model(filename)
 
   analyzer.write_network_and_disk_times_scatter(filename)
   
