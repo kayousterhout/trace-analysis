@@ -10,9 +10,10 @@ class Stage:
 
   def __str__(self):
     max_task_runtime = max([t.runtime() for t in self.tasks])
-    return ("%s tasks (avg runtime: %s, max runtime: %s) Start: %s, runtime: %s" %
+    return (("%s tasks (avg runtime: %s, max runtime: %s) Start: %s, runtime: %s, "
+      "Input MB: %s, Output MB: %s") %
       (len(self.tasks), self.average_task_runtime(), max_task_runtime, self.start_time,
-       self.finish_time() - self.start_time))
+       self.finish_time() - self.start_time, self.input_mb(), self.output_mb()))
 
   def verbose_str(self):
     # Get info about the longest task.
@@ -43,6 +44,24 @@ class Stage:
   def total_disk_read_time(self):
     return sum([t.total_disk_read_time for t in self.tasks if t.has_fetch])
 
+  def input_mb(self):
+    """ Returns the total input size for this stage.
+    
+    This is only valid if the stage read data from a shuffle.
+    TODO: Add HFDS / in-memory RDD input size.
+    """
+    total_input_bytes = sum([t.remote_mb_read + t.local_mb_read for t in self.tasks if t.has_fetch])
+    return total_input_bytes
+
+  def output_mb(self):
+    """ Returns the total output size for this stage.
+
+    This is only valid if the output data was written for a shuffle.
+    TODO: Add HDFS / in-memory RDD output size.
+    """
+    total_output_size = sum([t.shuffle_mb_written for t in self.tasks])
+    return total_output_size
+
   def add_event(self, line):
     if line.find("TASK_TYPE") == -1:
       return
@@ -54,5 +73,7 @@ class Stage:
       self.start_time = min(self.start_time, task.start_time)
 
     self.tasks.append(task)
+
+
 
 

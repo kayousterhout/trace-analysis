@@ -37,6 +37,7 @@ class Task:
     self.local_blocks_read = int(items_dict["BLOCK_FETCHED_LOCAL"])
     self.remote_blocks_read = int(items_dict["BLOCK_FETCHED_REMOTE"])
     self.remote_mb_read = int(items_dict["REMOTE_BYTES_READ"]) / 1048576.
+    self.local_mb_read = int(items_dict["LOCAL_READ_BYTES"]) / 1048576.
     self.local_read_time = int(items_dict["LOCAL_READ_TIME"])
     
     total_bytes_fetched = 0

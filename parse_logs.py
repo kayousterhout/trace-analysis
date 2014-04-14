@@ -274,6 +274,8 @@ class Analyzer:
   def fraction_fetch_time_reading_from_disk(self):
     total_time_fetching = sum([s.total_time_fetching() for s in self.stages.values()])
     total_disk_read_time = sum([s.total_disk_read_time() for s in self.stages.values()])
+    if total_time_fetching == 0:
+      return 0
     return total_disk_read_time * 1.0 / total_time_fetching
 
   def no_compute_speedup(self):
