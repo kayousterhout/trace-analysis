@@ -10,7 +10,7 @@ MIN_TIME = 0
 #112000
 
 def write_template(f):
-  template_file = open("template.gp")
+  template_file = open("running_tasks_template.gp")
   for line in template_file:
     f.write(line)
 
@@ -44,14 +44,15 @@ def get_average(items, earliest_time, latest_time):
   return sum(filtered_values) * 1.0 / len(filtered_values)
 
 def write_running_tasks_plot(file_prefix, y2label, output_filename, running_tasks_plot_file,
-    running_tasks_filename):
+    running_tasks_filename, experiment_duration):
   # Warning: this graph ends up looking like a comb -- since the time in between task launches is
   # short relative to task runtime.
   running_tasks_plot_file.write(
     "# Must be plotted from the parent directory for links to work correctly\n")
   write_template(running_tasks_plot_file)
   running_tasks_plot_file.write("set xlabel \"Time (ms)\"\n")
-  running_tasks_plot_file.write("set xrange [0:100000]\n")
+  running_tasks_plot_file.write("set xrange [%s:%s]\n" %
+    (experiment_duration - 200000, experiment_duration))
   running_tasks_plot_file.write("set y2tics\n")
   running_tasks_plot_file.write("set y2label \"%s\"\n" % y2label)
   running_tasks_plot_file.write("set output \"%s/%s.pdf\"\n\n" % (file_prefix, output_filename))
@@ -344,8 +345,9 @@ def parse_proc_file(filename):
 
   # Output one file with running tasks, CPU, and IO usage.
   running_tasks_plot_file = open("%s/running_tasks_cpu.gp" % file_prefix, "w")
+  experiment_duration = latest_time - earliest_time
   write_running_tasks_plot(file_prefix, "Percent", "running_tasks_cpu", running_tasks_plot_file,
-    running_tasks_filename)
+    running_tasks_filename, experiment_duration)
   running_tasks_plot_file.write(
     ("\"%s\" using 1:2 w l ls 4 title \"GC\" axes x1y2,\\\n" % gc_filename))
   running_tasks_plot_file.write(
@@ -370,7 +372,7 @@ def parse_proc_file(filename):
   # Output two network files: one with bytes and another with packets.
   network_plot_file = open("%s/running_tasks_network_bytes.gp" % file_prefix, "w")
   write_running_tasks_plot(file_prefix, "MB", "running_tasks_network_bytes",
-    network_plot_file, running_tasks_filename)
+    network_plot_file, running_tasks_filename, experiment_duration)
   network_plot_file.write(
     ("\"%s\" using 1:2 w l ls 2 title \"Transmitted bytes\" axes x1y2,\\\n" %
       trans_bytes_rate_filename))
@@ -379,7 +381,7 @@ def parse_proc_file(filename):
 
   io_plot_file = open("%s/running_tasks_io.gp" % file_prefix, "w")
   write_running_tasks_plot(file_prefix, "MB/s", "running_tasks_io", io_plot_file,
-    running_tasks_filename)
+    running_tasks_filename, experiment_duration)
   next_line_style = 2
   for device_name in sectors_read_rate.keys():
     if next_line_style > 2:
@@ -398,7 +400,7 @@ def parse_proc_file(filename):
 
   network_plot_file = open("%s/running_tasks_network_packets.gp" % file_prefix, "w")
   write_running_tasks_plot(file_prefix, "packets", "running_tasks_network_packets",
-    network_plot_file, running_tasks_filename)
+    network_plot_file, running_tasks_filename, experiment_duration)
   network_plot_file.write(
     ("\"%s\" using 1:2 w l ls 2 title \"Transmitted packets\" axes x1y2,\\\n" %
       trans_packets_rate_filename))
