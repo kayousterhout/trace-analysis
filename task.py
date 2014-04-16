@@ -27,6 +27,16 @@ class Task:
       self.shuffle_write_time = int(items_dict[SHUFFLE_WRITE_TIME_KEY]) / 1.0e6
       self.shuffle_mb_written = int(items_dict["SHUFFLE_BYTES_WRITTEN"]) / 1048576.
 
+    INPUT_METHOD_KEY = "READ_METHOD"
+    self.input_read_time = 0
+    self.input_read_method = "unknown"
+    self.input_bytes = 0
+    if INPUT_METHOD_KEY in items_dict:
+      self.input_read_time = ((int(items_dict["READ_SETUP_TIME"]) +
+        int(items_dict["READ_BLOCKED_TIME"])) / 1.0e6)
+      self.input_read_method = items_dict["READ_METHOD"]
+      self.input_bytes = float(items_dict["INPUT_BYTES"]) / 1048576.
+
     self.has_fetch = True
     if line.find("FETCH") < 0:
       self.has_fetch = False
@@ -91,7 +101,8 @@ class Task:
      Assumes shuffle writes don't get pipelined with task execution (TODO: verify this).
      Does not include GC time.
      """
-     compute_time = self.runtime() - self.scheduler_delay - self.gc_time - self.shuffle_write_time
+     compute_time = (self.runtime() - self.scheduler_delay - self.gc_time -
+       self.shuffle_write_time - self.input_read_time)
      if self.has_fetch:
        # Subtract off of the time to read local data (which typically comes from disk) because
        # this read happens before any of the computation starts.
@@ -178,6 +189,18 @@ class Task:
     speedup = new_runtime * 1.0 / self.runtime()
     self.logger.debug("Speedup from eliminating disk: %s" % speedup)
     return new_runtime
+
+  def runtime_no_input(self):
+    new_finish_time = self.finish_time - self.input_read_time
+    return new_finish_time - self.start_time
+
+  def runtime_no_output(self):
+    new_finish_time = self.finish_time - self.output_write_time
+    return new_finish_time - self.start_time
+
+  def runtime_no_input_or_output(self):
+    new_finish_time = self.finish_time - self.input_read_time - self.output_write_time
+    return new_finish_time - self.start_time
 
   def finish_time_faster_fetch(self, relative_fetch_time):
     """ Returns the finish time of the job if the fetch had completed faster.

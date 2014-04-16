@@ -10,10 +10,14 @@ class Stage:
 
   def __str__(self):
     max_task_runtime = max([t.runtime() for t in self.tasks])
+    if self.tasks[0].has_fetch:
+      input_method = "shuffle"
+    else:
+      input_method = self.tasks[0].input_read_method
     return (("%s tasks (avg runtime: %s, max runtime: %s) Start: %s, runtime: %s, "
-      "Input MB: %s, Output MB: %s") %
+      "Input MB: %s (from %s), Output MB: %s") %
       (len(self.tasks), self.average_task_runtime(), max_task_runtime, self.start_time,
-       self.finish_time() - self.start_time, self.input_mb(), self.output_mb()))
+       self.finish_time() - self.start_time, self.input_mb(), input_method, self.output_mb()))
 
   def verbose_str(self):
     # Get info about the longest task.
@@ -48,9 +52,9 @@ class Stage:
     """ Returns the total input size for this stage.
     
     This is only valid if the stage read data from a shuffle.
-    TODO: Add HFDS / in-memory RDD input size.
     """
     total_input_bytes = sum([t.remote_mb_read + t.local_mb_read for t in self.tasks if t.has_fetch])
+    total_input_bytes += sum([t.input_bytes for t in self.tasks])
     return total_input_bytes
 
   def output_mb(self):

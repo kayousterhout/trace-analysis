@@ -255,12 +255,18 @@ class Analyzer:
       total_runtime += sum([t.runtime() for t in stage.tasks])
     return total_network_time * 1.0 / total_runtime
 
-  def disk_speedup(self):
-    """ Returns the speedup if all disk I/O time had been completely eliminated. """
+  def no_disk_shuffle_speedup(self):
+    """ Returns the speedup if all disk I/O time for the shuffle had been completely eliminated. """
     return self.calculate_speedup(
       "Computing speedup without disk",
       lambda t: t.runtime(),
       lambda t: t.runtime_no_disk_for_shuffle())
+
+  def no_input_disk_speedup(self):
+    return self.calculate_speedup(
+      "Computing speedup without disk input",
+      lambda t: t.runtime(),
+      lambda t: t.runtime_no_input())
 
   def fraction_time_waiting_on_disk(self):
     total_disk_wait_time = 0
@@ -407,11 +413,16 @@ class Analyzer:
       start = task.start_time - first_start
       # Show the scheduler delay at the beginning -- but it could be at the beginning or end or split.
       scheduler_delay_end = start + task.scheduler_delay
+      hdfs_read_end = scheduler_delay_end
       local_read_end = scheduler_delay_end
       fetch_wait_end = scheduler_delay_end
       if task.has_fetch:
         local_read_end = scheduler_delay_end + task.local_read_time
         fetch_wait_end = local_read_end + task.fetch_wait
+      elif task.input_read_method == "HDFS":
+        hdfs_read_end = scheduler_delay_end + task.input_read_time
+        local_read_end = hdfs_read_end
+        fetch_wait_end = hdfs_read_end
       compute_end = fetch_wait_end + task.compute_time()
       gc_end = compute_end + task.gc_time
       task_end = gc_end + task.shuffle_write_time
@@ -427,7 +438,8 @@ class Analyzer:
         plot_file.write(LINE_TEMPLATE % (local_read_end, i, fetch_wait_end, i, 2))
         plot_file.write(LINE_TEMPLATE % (fetch_wait_end, i, compute_end, i, 3))
       else:
-        plot_file.write(LINE_TEMPLATE % (scheduler_delay_end, i, compute_end, i, 3))
+        plot_file.write(LINE_TEMPLATE % (scheduler_delay_end, i, hdfs_read_end, i, 7))
+        plot_file.write(LINE_TEMPLATE % (hdfs_read_end, i, compute_end, i, 3))
       plot_file.write(LINE_TEMPLATE % (compute_end, i, gc_end, i, 4))
       plot_file.write(LINE_TEMPLATE % (gc_end, i, task_end, i, 5))
 
@@ -439,7 +451,8 @@ class Analyzer:
     plot_file.write("set output \"%s_waterfall.pdf\"\n" % prefix)
 
     # Hacky way to force a key to be printed.
-    plot_file.write("plot -1 ls 6 title 'Scheduler delay', -1 ls 1 title 'Local read wait',\\\n")
+    plot_file.write("plot -1 ls 6 title 'Scheduler delay', -1 ls 1 title 'HDFS read',\\\n")
+    plot_file.write("-1 ls 1 title 'Local read wait',\\\n")
     plot_file.write("-1 ls 2 title 'Network wait', -1 ls 3 title 'Compute', \\\n")
     plot_file.write("-1 ls 4 title 'GC', -1 ls 5 title 'Disk write wait'\\\n")
     plot_file.close()
@@ -502,8 +515,10 @@ def main(argv):
   print "\nFraction time using network: %s" % fraction_time_using_network
   print ("\nFraction of fetch time spent reading from disk: %s" %
     analyzer.fraction_fetch_time_reading_from_disk())
-  no_disk_speedup = analyzer.disk_speedup()
-  print "Speedup from eliminating disk: %s" % no_disk_speedup
+  no_disk_speedup = analyzer.no_disk_shuffle_speedup()
+  print "Speedup from eliminating disk for shuffle: %s" % no_disk_speedup
+  no_input_disk_speedup = analyzer.no_input_disk_speedup()
+  print "Speedup from eliminating disk for input: %s" % no_input_disk_speedup
   fraction_time_waiting_on_disk = analyzer.fraction_time_waiting_on_disk()
   print "Fraction time waiting on disk: %s" % fraction_time_waiting_on_disk
   fraction_time_using_disk = analyzer.fraction_time_using_disk()
@@ -530,10 +545,11 @@ def main(argv):
     agg_results_filename = argv[2]
     print "Adding results to %s" % agg_results_filename
     f = open(agg_results_filename, "a")
+    # TODO: Fix this!  The 3 disk times are inconsistent.
     f.write("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (
       filename.split("/")[1].split("_")[0],
       no_network_speedup, fraction_time_waiting_on_network, fraction_time_using_network,
-      no_disk_speedup, fraction_time_waiting_on_disk, fraction_time_using_disk,
+      no_input_disk_speedup, fraction_time_waiting_on_disk, fraction_time_using_disk,
       no_compute_speedup, fraction_time_waiting_on_compute, fraction_time_computing,
       no_stragglers_average_runtime_speedup, no_stragglers_replace_with_median_speedup,
       no_stragglers_replace_95_with_median_speedup))
