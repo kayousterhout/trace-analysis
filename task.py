@@ -15,7 +15,9 @@ class Task:
     self.start_time = int(items_dict["START_TIME"])
     self.finish_time = int(items_dict["FINISH_TIME"])
     self.executor_run_time = int(items_dict["EXECUTOR_RUN_TIME"])
-    self.scheduler_delay = self.finish_time - self.executor_run_time - self.start_time
+    self.executor_deserialize_time = int(items_dict["EXECUTOR_DESERIALIZE_TIME"])
+    self.scheduler_delay = (self.finish_time - self.executor_run_time -
+      self.executor_deserialize_time - self.start_time)
     self.gc_time = int(items_dict["GC_TIME"])
     self.executor_deserialize_time = int(items_dict["EXECUTOR_DESERIALIZE_TIME"])
 
@@ -63,28 +65,6 @@ class Task:
     # (bytes, network time) for each fetch. The network time is the total fetch time
     # minus the disk read time.
     self.network_times = []
-    for fetch_info_str in items_dict["FETCH_INFOS"].split(";"):
-      items_dict = {}
-      if len(fetch_info_str) == 0:
-        continue
-      for item in fetch_info_str.split(","):
-        key, value = item.split(":")
-        items_dict[key] = int(value)
-      transferred_bytes = items_dict["Bytes"]
-      fetch_start = items_dict["Start"]
-      if self.first_fetch_start == -1:
-        self.first_fetch_start = fetch_start
-      else:
-        self.first_fetch_start = min(fetch_start, self.first_fetch_start)
-      fetch_time = items_dict["FetchProcessingEnd"] - fetch_start
-      self.total_time_fetching += fetch_time
-      # Convert to milliseconds (from nanoseconds).
-      disk_read_time = items_dict["DiskReadTime"] / 1.0e6
-      if disk_read_time > fetch_time:
-        print "WARNING: Disk read time (%s) > fetch time (%s)" % (disk_read_time, fetch_time)
-      self.total_disk_read_time += disk_read_time
-      self.disk_times.append((transferred_bytes, disk_read_time))
-      self.network_times.append((transferred_bytes, fetch_time - disk_read_time))
 
   def network_time(self):
     """ Returns the amount of time this task spent using the network.
@@ -101,8 +81,8 @@ class Task:
      Assumes shuffle writes don't get pipelined with task execution (TODO: verify this).
      Does not include GC time.
      """
-     compute_time = (self.runtime() - self.scheduler_delay - self.gc_time -
-       self.shuffle_write_time - self.input_read_time)
+     compute_time = (self.runtime() - self.scheduler_delay - self.executor_deserialize_time -
+       self.gc_time - self.shuffle_write_time - self.input_read_time)
      if self.has_fetch:
        # Subtract off of the time to read local data (which typically comes from disk) because
        # this read happens before any of the computation starts.
@@ -122,7 +102,7 @@ class Task:
     # The final reason that this is an approximation is that the shuffle write time could overlap with
     # the shuffle time (if a task is both reading shuffle inputs and writing shuffle outputs).
     # We should be able to fix the logging to correct this issue.
-    compute_wait_time = self.finish_time - self.start_time - self.shuffle_write_time
+    compute_wait_time = self.finish_time - self.start_time - self.shuffle_write_time - self.scheduler_delay - self.gc_time - self.input_read_time
     if self.has_fetch:
       shuffle_time = self.shuffle_finish_time - self.start_time
       compute_wait_time = compute_wait_time - shuffle_time

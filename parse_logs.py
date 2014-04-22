@@ -63,9 +63,12 @@ class Analyzer:
         print "Overlap:", self.overlap, "between ", id, "and", previous_id
         self.stages_to_combine.add(id)
         self.stages_to_combine.add(previous_id)
+        old_end = max(old_end, finish)
       if finish > old_end:
         old_end = finish
         previous_id = id
+
+    print "Stages to combine: ", self.stages_to_combine
 
   def all_tasks(self):
     """ Returns a list of all tasks. """
@@ -136,9 +139,14 @@ class Analyzer:
         else:
           no_straggler_runtimes.append(runtime)
       if id in self.stages_to_combine:
-        runtimes_for_combined_stages.extend(runtimes)
+        runtimes_for_combined_stages.extend(no_straggler_runtimes)
       else:
-        total_no_stragglers_runtime += simulate.simulate(no_straggler_runtimes)
+        no_stragglers_runtime = simulate.simulate(no_straggler_runtimes)
+        total_no_stragglers_runtime += no_stragglers_runtime
+        original_runtime = simulate.simulate([task.runtime() for task in stage.tasks])
+        print "%s: Orig: %s, no stragg: %s" % (id, original_runtime, no_stragglers_runtime)
+    if len(runtimes_for_combined_stages) > 0:
+      total_no_stragglers_runtime += simulate.simulate(runtimes_for_combined_stages)
     return total_no_stragglers_runtime * 1.0 / self.get_simulated_runtime()
 
 
@@ -161,9 +169,11 @@ class Analyzer:
         else:
           no_straggler_runtimes.append(runtime)
       if id in self.stages_to_combine:
-        runtimes_for_combined_stages.extend(runtimes)
+        runtimes_for_combined_stages.extend(no_straggler_runtimes)
       else:
         total_no_stragglers_runtime += simulate.simulate(no_straggler_runtimes)
+    if len(runtimes_for_combined_stages) > 0:
+      total_no_stragglers_runtime += simulate.simulate(runtimes_for_combined_stages)
     return total_no_stragglers_runtime * 1.0 / self.get_simulated_runtime()
 
   def calculate_speedup(self, description, compute_base_runtime, compute_faster_runtime):
@@ -413,32 +423,34 @@ class Analyzer:
       start = task.start_time - first_start
       # Show the scheduler delay at the beginning -- but it could be at the beginning or end or split.
       scheduler_delay_end = start + task.scheduler_delay
-      hdfs_read_end = scheduler_delay_end
-      local_read_end = scheduler_delay_end
-      fetch_wait_end = scheduler_delay_end
+      deserialize_end = scheduler_delay_end + task.executor_deserialize_time
+      hdfs_read_end = deserialize_end
+      local_read_end = deserialize_end
+      fetch_wait_end = deserialize_end
       if task.has_fetch:
-        local_read_end = scheduler_delay_end + task.local_read_time
+        local_read_end = deserialize_end + task.local_read_time
         fetch_wait_end = local_read_end + task.fetch_wait
       elif task.input_read_method == "HDFS":
-        hdfs_read_end = scheduler_delay_end + task.input_read_time
+        hdfs_read_end = deserialize_end + task.input_read_time
         local_read_end = hdfs_read_end
         fetch_wait_end = hdfs_read_end
       compute_end = fetch_wait_end + task.compute_time()
       gc_end = compute_end + task.gc_time
       task_end = gc_end + task.shuffle_write_time
       if math.fabs((first_start + task_end) - task.finish_time) >= 0.1:
-        print "Mismatch at index %s" % i
+        print "!!!!!!!!!!!!!!!!Mismatch at index %s" % i
         print task
-        assert False
+        #assert False
 
       # Write data to plot file.
       plot_file.write(LINE_TEMPLATE % (start, i, scheduler_delay_end, i, 6))
+      plot_file.write(LINE_TEMPLATE % (scheduler_delay_end, i, deserialize_end, i, 8))
       if task.has_fetch:
-        plot_file.write(LINE_TEMPLATE % (scheduler_delay_end, i, local_read_end, i, 1))
+        plot_file.write(LINE_TEMPLATE % (deserialize_end, i, local_read_end, i, 1))
         plot_file.write(LINE_TEMPLATE % (local_read_end, i, fetch_wait_end, i, 2))
         plot_file.write(LINE_TEMPLATE % (fetch_wait_end, i, compute_end, i, 3))
       else:
-        plot_file.write(LINE_TEMPLATE % (scheduler_delay_end, i, hdfs_read_end, i, 7))
+        plot_file.write(LINE_TEMPLATE % (deserialize_end, i, hdfs_read_end, i, 7))
         plot_file.write(LINE_TEMPLATE % (hdfs_read_end, i, compute_end, i, 3))
       plot_file.write(LINE_TEMPLATE % (compute_end, i, gc_end, i, 4))
       plot_file.write(LINE_TEMPLATE % (gc_end, i, task_end, i, 5))
@@ -451,7 +463,8 @@ class Analyzer:
     plot_file.write("set output \"%s_waterfall.pdf\"\n" % prefix)
 
     # Hacky way to force a key to be printed.
-    plot_file.write("plot -1 ls 6 title 'Scheduler delay', -1 ls 1 title 'HDFS read',\\\n")
+    plot_file.write("plot -1 ls 6 title 'Scheduler delay',\\\n")
+    plot_file.write(" -1 ls 8 title 'Task deserialization', -1 ls 7 title 'HDFS read',\\\n")
     plot_file.write("-1 ls 1 title 'Local read wait',\\\n")
     plot_file.write("-1 ls 2 title 'Network wait', -1 ls 3 title 'Compute', \\\n")
     plot_file.write("-1 ls 4 title 'GC', -1 ls 5 title 'Disk write wait'\\\n")
@@ -460,8 +473,6 @@ class Analyzer:
   def make_cdfs_for_performance_model(self, prefix):
     """ Writes plot files to create CDFS of the compute / network / disk rate. """
     all_tasks = self.all_tasks()
-# TODO: Right now we don't record the input data size if it's read locally / not from
-# a shuffle?!?!?!?!?!?!?!????
     compute_rates = [task.compute_time() * 1.0 / task.input_data for task in all_tasks]
     write_cdf(compute_rates, "%s_compute_rate_cdf" % prefix)
     
@@ -471,16 +482,7 @@ class Analyzer:
     write_rates = [task.shuffle_write_time * 1.0 / task.shuffle_mb_written for task in all_tasks]
     write_cdf(write_rates, "%s_write_rate_cdf" % prefix)
 
-def main(argv):
-  if len(argv) < 2:
-    print "Usage: python parse_logs.py <log filename> <debug level> <(OPT) agg. results filename>"
-    sys.exit()
-
-  log_level = argv[1]
-  if log_level == "debug":
-    logging.basicConfig(level=logging.DEBUG)
-  logging.basicConfig(level=logging.INFO)
-  filename = argv[0]
+def parse(filename, agg_results_filename=None):
   analyzer = Analyzer(filename)
 
   analyzer.print_stage_info()
@@ -541,19 +543,33 @@ def main(argv):
     (no_stragglers_average_runtime_speedup, no_stragglers_replace_with_median_speedup,
      no_stragglers_replace_95_with_median_speedup))
 
-  if len(argv) > 2:
-    agg_results_filename = argv[2]
+  if agg_results_filename != None:
     print "Adding results to %s" % agg_results_filename
     f = open(agg_results_filename, "a")
-    # TODO: Fix this!  The 3 disk times are inconsistent.
-    f.write("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (
+    f.write("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (
       filename.split("/")[1].split("_")[0],
       no_network_speedup, fraction_time_waiting_on_network, fraction_time_using_network,
-      no_input_disk_speedup, fraction_time_waiting_on_disk, fraction_time_using_disk,
+      no_disk_speedup, fraction_time_waiting_on_disk, fraction_time_using_disk,
       no_compute_speedup, fraction_time_waiting_on_compute, fraction_time_computing,
       no_stragglers_average_runtime_speedup, no_stragglers_replace_with_median_speedup,
-      no_stragglers_replace_95_with_median_speedup))
+      no_stragglers_replace_95_with_median_speedup, no_input_disk_speedup))
     f.close()
+
+
+def main(argv):
+  if len(argv) < 2:
+    print "Usage: python parse_logs.py <log filename> <debug level> <(OPT) agg. results filename>"
+    sys.exit()
+
+  log_level = argv[1]
+  if log_level == "debug":
+    logging.basicConfig(level=logging.DEBUG)
+  logging.basicConfig(level=logging.INFO)
+  filename = argv[0]
+  if len(argv) > 2:
+    parse(filename, argv[2])
+  else:
+    parse(filename)
 
 if __name__ == "__main__":
   main(sys.argv[1:])

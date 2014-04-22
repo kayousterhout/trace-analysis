@@ -22,6 +22,7 @@ set style line 4 lt rgb "#a6d854" lw 1 pt 3
 set style line 5 lt rgb "#66c2a5" lw 1 pt 4
 set style line 6 lt rgb "#ffd92f" lw 1 pt 5
 set style line 7 lt rgb "#e5c494" lw 1 pt 7
+set style line 8 lt rgb "#b3b3b3" lw 1 pt 8
 
 set xlabel "Time (ms)" offset 0,0.5
 set key above
