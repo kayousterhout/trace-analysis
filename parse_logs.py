@@ -94,13 +94,29 @@ class Analyzer:
         tasks_for_combined_stages.extend(stage.tasks)
       else:
         tasks = sorted(stage.tasks, key = lambda task: task.start_time)
-        total_runtime += simulate.simulate([task.runtime() for task in tasks])
+        total_runtime += simulate.simulate([task.runtime() for task in tasks])[0]
     if len(tasks_for_combined_stages) > 0:
       tasks = sorted(tasks_for_combined_stages, key = lambda task: task.start_time)
-      total_runtime += simulate.simulate([task.runtime() for task in tasks])
+      total_runtime += simulate.simulate([task.runtime() for task in tasks])[0]
     return total_runtime 
 
-  def no_stragglers_using_average_runtime_speedup(self):
+  def simulated_runtime_over_actual(self):
+    simulated_runtime = self.get_simulated_runtime()
+    # TODO: Incorporate Shark setup time here!
+    actual_start_time = min([s.start_time for s in self.stages.values()])
+    actual_finish_time = max([s.finish_time() for s in self.stages.values()])
+    print "Simulated runtime: ", simulated_runtime, "actual time: ", actual_finish_time - actual_start_time
+    return simulated_runtime * 1.0 / (actual_finish_time - actual_start_time)
+
+  def no_stragglers_perfect_parallelism_speedup(self, num_slots=32):
+    """ Returns how fast the job would have run if time were perfectly spread across 32 slots. """
+    total_runtime = sum([s.total_runtime() for s in self.stages.values()])
+    finish_time = max([s.finish_time() for s in self.stages.values()])
+    start_time = min([s.start_time for s in self.stages.values()])
+    ideal_runtime = total_runtime * 1.0 / 32
+    return ideal_runtime / (finish_time - start_time)
+
+  def no_stragglers_using_average_runtime_speedup(self, prefix):
     """ Returns how much faster the job would have run if there were no stragglers.
 
     Eliminates stragglers by replacing each task's runtime with the average runtime
@@ -109,14 +125,31 @@ class Analyzer:
     self.print_heading("Computing speedup by averaging out stragglers")
     total_no_stragglers_runtime = 0
     averaged_runtimes_for_combined_stages = []
+    all_start_finish_times = []
     for id, stage in self.stages.iteritems():
       averaged_runtimes = [stage.average_task_runtime()] * len(stage.tasks)
       if id in self.stages_to_combine:
         averaged_runtimes_for_combined_stages.extend(averaged_runtimes) 
       else:
-        total_no_stragglers_runtime += simulate.simulate(averaged_runtimes)
+        no_stragglers_runtime, start_finish_times = simulate.simulate(averaged_runtimes)
+        # Adjust the start and finish times based on when the stage staged.
+        start_finish_times_adjusted = [
+          (start + total_no_stragglers_runtime, finish + total_no_stragglers_runtime) \
+          for start, finish in start_finish_times]
+        total_no_stragglers_runtime += no_stragglers_runtime
+        all_start_finish_times.append(start_finish_times_adjusted)
     if len(averaged_runtimes_for_combined_stages) > 0:
-      total_no_stragglers_runtime += simulate.simulate(averaged_runtimes_for_combined_stages)
+      no_stragglers_runtime, start_finish_times = simulate.simulate(
+        averaged_runtimes_for_combined_stages)
+      # Adjust the start and finish times based on when the stage staged.
+      # The subtraction is a hack to put the combined stages at the beginning, which
+      # is when they usually occur.
+      start_finish_times_adjusted = [
+        (start - no_stragglers_runtime, finish - no_stragglers_runtime) for start, finish in start_finish_times]
+      total_no_stragglers_runtime += no_stragglers_runtime
+      all_start_finish_times.append(start_finish_times_adjusted)
+
+    self.write_simulated_waterfall(all_start_finish_times, "%s_sim_no_stragglers" % prefix)
     return total_no_stragglers_runtime * 1.0 / self.get_simulated_runtime()
 
   def replace_95_stragglers_with_median_speedup(self):
@@ -141,12 +174,12 @@ class Analyzer:
       if id in self.stages_to_combine:
         runtimes_for_combined_stages.extend(no_straggler_runtimes)
       else:
-        no_stragglers_runtime = simulate.simulate(no_straggler_runtimes)
+        no_stragglers_runtime = simulate.simulate(no_straggler_runtimes)[0]
         total_no_stragglers_runtime += no_stragglers_runtime
         original_runtime = simulate.simulate([task.runtime() for task in stage.tasks])
         print "%s: Orig: %s, no stragg: %s" % (id, original_runtime, no_stragglers_runtime)
     if len(runtimes_for_combined_stages) > 0:
-      total_no_stragglers_runtime += simulate.simulate(runtimes_for_combined_stages)
+      total_no_stragglers_runtime += simulate.simulate(runtimes_for_combined_stages)[0]
     return total_no_stragglers_runtime * 1.0 / self.get_simulated_runtime()
 
 
@@ -171,9 +204,9 @@ class Analyzer:
       if id in self.stages_to_combine:
         runtimes_for_combined_stages.extend(no_straggler_runtimes)
       else:
-        total_no_stragglers_runtime += simulate.simulate(no_straggler_runtimes)
+        total_no_stragglers_runtime += simulate.simulate(no_straggler_runtimes)[0]
     if len(runtimes_for_combined_stages) > 0:
-      total_no_stragglers_runtime += simulate.simulate(runtimes_for_combined_stages)
+      total_no_stragglers_runtime += simulate.simulate(runtimes_for_combined_stages)[0]
     return total_no_stragglers_runtime * 1.0 / self.get_simulated_runtime()
 
   def calculate_speedup(self, description, compute_base_runtime, compute_faster_runtime):
@@ -204,11 +237,11 @@ class Analyzer:
 
       # Get the runtime for the stage
       task_runtimes = [compute_base_runtime(task) for task in tasks]
-      base_runtime = simulate.simulate(task_runtimes)
+      base_runtime = simulate.simulate(task_runtimes)[0]
       total_time[0] += base_runtime
 
       faster_runtimes = [compute_faster_runtime(task) for task in tasks]
-      faster_runtime = simulate.simulate(faster_runtimes)
+      faster_runtime = simulate.simulate(faster_runtimes)[0]
       total_faster_time[0] += faster_runtime
       print "Base: %s, faster: %s" % (base_runtime, faster_runtime)
 
@@ -399,6 +432,48 @@ class Analyzer:
     plot_file.write("plot \"%s\" using 1:2 with dots title \"Disk Write\"\n" % filename)
     plot_file.close()
 
+  def write_simulated_waterfall(self, start_finish_times, prefix):
+    """ Outputs a gnuplot file that visually shows all task runtimes.
+    
+    start_finish_times is expected to be a list of lists, one for each stage,
+    where the list for a particular stage contains the start and finish times
+    for each task.
+    """
+    cumulative_tasks = 0
+    stage_cumulative_tasks = []
+    all_times = []
+    # Sort stages by the start time of the first task.
+    for stage_times in sorted(start_finish_times):
+      all_times.extend(stage_times)
+      cumulative_tasks = cumulative_tasks + len(stage_times)
+      stage_cumulative_tasks.append(str(cumulative_tasks))
+
+    base_file = open("waterfall_base.gp", "r")
+    plot_file = open("%s_waterfall.gp" % prefix, "w")
+    for line in base_file:
+      plot_file.write(line)
+    base_file.close()
+
+    LINE_TEMPLATE = "set arrow from %s,%s to %s,%s ls %s nohead\n"
+
+    # Write all time relative to the first start time so the graph is easier to read.
+    first_start = all_times[0][0]
+    for i, start_finish in enumerate(all_times):
+      start = start_finish[0] - first_start
+      finish = start_finish[1] - first_start
+      # Write data to plot file.
+      plot_file.write(LINE_TEMPLATE % (start, i, finish, i, 3))
+
+    last_end = all_times[-1][1]
+    ytics_str = ",".join(stage_cumulative_tasks)
+    plot_file.write("set ytics (%s)\n" % ytics_str)
+    plot_file.write("set xrange [0:%s]\n" % (last_end - first_start))
+    plot_file.write("set yrange [0:%s]\n" % len(all_times))
+    plot_file.write("set output \"%s_waterfall.pdf\"\n" % prefix)
+    plot_file.write("plot -1\n")
+
+    plot_file.close()
+
   def write_waterfall(self, prefix):
     """ Outputs a gnuplot file that visually shows all task runtimes. """
     all_tasks = []
@@ -502,7 +577,7 @@ def parse(filename, agg_results_filename=None):
   # is for a 4x faster network.
   results_file = open("%s_improvements" % filename, "w")
   no_network_speedup = -1
-  for relative_fetch_time in [0, 0.25, 0.5, 0.75, 0.9, 0.95, 1.0]:
+  for relative_fetch_time in [0]:
     faster_fetch_speedup = analyzer.network_speedup(relative_fetch_time)
     print "Speedup from relative fetch of %s: %s" % (relative_fetch_time, faster_fetch_speedup)
     if relative_fetch_time == 0:
@@ -535,24 +610,32 @@ def parse(filename, agg_results_filename=None):
   fraction_time_computing = analyzer.fraction_time_computing()
   print "\nFraction of time computing: %s" % fraction_time_computing
   
-  no_stragglers_average_runtime_speedup = analyzer.no_stragglers_using_average_runtime_speedup()
+  no_stragglers_average_runtime_speedup = analyzer.no_stragglers_using_average_runtime_speedup(
+    filename)
   no_stragglers_replace_with_median_speedup = analyzer.replace_stragglers_with_median_speedup()
   no_stragglers_replace_95_with_median_speedup = \
     analyzer.replace_95_stragglers_with_median_speedup()
-  print ("\nSpeedup from eliminating stragglers: %s (use average) %s (1.5=>med) %s (95%%ile=>med)" %
-    (no_stragglers_average_runtime_speedup, no_stragglers_replace_with_median_speedup,
-     no_stragglers_replace_95_with_median_speedup))
+  no_stragglers_perfect_parallelism = \
+    analyzer.no_stragglers_perfect_parallelism_speedup()
+  print (("\nSpeedup from eliminating stragglers: %s (perfect parallelism) %s (use average) "
+    "%s (1.5=>med) %s (95%%ile=>med)") %
+    (no_stragglers_perfect_parallelism, no_stragglers_average_runtime_speedup,
+     no_stragglers_replace_with_median_speedup, no_stragglers_replace_95_with_median_speedup))
+
+  simulated_versus_actual = analyzer.simulated_runtime_over_actual()
+  print "\n Simulated versus actual runtime: ", simulated_versus_actual
 
   if agg_results_filename != None:
     print "Adding results to %s" % agg_results_filename
     f = open(agg_results_filename, "a")
-    f.write("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (
+    f.write("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (
       filename.split("/")[1].split("_")[0],
       no_network_speedup, fraction_time_waiting_on_network, fraction_time_using_network,
       no_disk_speedup, fraction_time_waiting_on_disk, fraction_time_using_disk,
       no_compute_speedup, fraction_time_waiting_on_compute, fraction_time_computing,
       no_stragglers_average_runtime_speedup, no_stragglers_replace_with_median_speedup,
-      no_stragglers_replace_95_with_median_speedup, no_input_disk_speedup))
+      no_stragglers_replace_95_with_median_speedup, no_stragglers_perfect_parallelism,
+      no_input_disk_speedup, simulated_versus_actual))
     f.close()
 
 
