@@ -1,3 +1,4 @@
+import numpy
 from task import Task
 
 class Stage:
@@ -27,8 +28,7 @@ class Stage:
       if task.runtime() > max_runtime:
         max_runtime = task.runtime()
         max_index = i
-    return "%s\n    Longest Task: %s" % (self, self.tasks[i])
-    
+    return "%s\n    Longest Task: %s" % (self, self.tasks[i])    
 
   def finish_time(self):
     return max([t.finish_time for t in self.tasks])
@@ -46,7 +46,21 @@ class Stage:
     return sum([t.total_time_fetching for t in self.tasks if t.has_fetch])
 
   def total_disk_read_time(self):
-    return sum([t.total_disk_read_time for t in self.tasks if t.has_fetch])
+    return sum([t.remote_disk_read_time for t in self.tasks if t.has_fetch])
+
+  def task_runtimes_with_median_progress_rate(self):
+    """ Returns task runtimes using the Dolly method to eliminate stragglers.
+
+    Replaces each task's runtime with the runtime based on the median progress rate
+    for the stage. """
+    # Ignore tasks with 0 input bytes when computing progress rates. These seem to occur for the
+    # big shuffle to partition the data (even though the blocks read are non-zero for those tasks).
+    # TODO: Figure out what's going on with the zero-input-mb tasks.
+    progress_rates = [t.runtime() * 1.0 / t.input_size_mb() for t in self.tasks
+      if t.input_size_mb() > 0]
+    median_progress_rate = numpy.median(progress_rates)
+    runtimes = [t.input_size_mb() * median_progress_rate for t in self.tasks]
+    return runtimes
 
   def input_mb(self):
     """ Returns the total input size for this stage.
@@ -54,7 +68,7 @@ class Stage:
     This is only valid if the stage read data from a shuffle.
     """
     total_input_bytes = sum([t.remote_mb_read + t.local_mb_read for t in self.tasks if t.has_fetch])
-    total_input_bytes += sum([t.input_bytes for t in self.tasks])
+    total_input_bytes += sum([t.input_mb for t in self.tasks])
     return total_input_bytes
 
   def output_mb(self):

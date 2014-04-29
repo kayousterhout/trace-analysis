@@ -1,6 +1,7 @@
 import collections
 import logging
 import math
+import numpy
 import sys
 
 import simulate
@@ -123,6 +124,20 @@ class Analyzer:
     print "Simulated runtime: ", simulated_runtime, "actual time: ", actual_finish_time - actual_start_time
     return simulated_runtime * 1.0 / (actual_finish_time - actual_start_time)
 
+  def median_progress_rate_speedup(self):
+    """ Returns how fast the job would have run if all tasks had the median progress rate. """
+    total_median_progress_rate_runtime = 0
+    runtimes_for_combined_stages = []
+    for id, stage in self.stages.iteritems():
+      median_rate_runtimes = stage.task_runtimes_with_median_progress_rate()
+      if id in self.stages_to_combine:
+        runtimes_for_combined_stages.extend(median_rate_runtimes)
+      else:
+        total_median_progress_rate_runtime += simulate.simulate(median_rate_runtimes)[0]
+    if len(runtimes_for_combined_stages) > 0:
+      total_median_progress_rate_runtime += simulate.simulate(runtimes_for_combined_stages)[0]
+    return total_median_progress_rate_runtime * 1.0 / self.get_simulated_runtime()
+
   def no_stragglers_perfect_parallelism_speedup(self, num_slots=32):
     """ Returns how fast the job would have run if time were perfectly spread across 32 slots. """
     total_runtime = sum([s.total_runtime() for s in self.stages.values()])
@@ -201,21 +216,15 @@ class Analyzer:
   def replace_stragglers_with_median_speedup(self):
     """ Returns how much faster the job would have run if there were no stragglers.
 
-    Removes stragglers by replacing tasks that took more than 50% longer than the median
-    with the median runtime for tasks in the stage.
+    Removes stragglers by replacing all task runtimes with the median runtime for tasks in the
+    stage.
     """
     total_no_stragglers_runtime = 0
     runtimes_for_combined_stages = []
     for id, stage in self.stages.iteritems():
       runtimes = [task.runtime() for task in stage.tasks]
-      runtimes.sort()
-      median_runtime = get_percentile(runtimes, 0.5)
-      no_straggler_runtimes = []
-      for runtime in runtimes:
-        if runtime > 1.5 * median_runtime:
-          no_straggler_runtimes.append(median_runtime)
-        else:
-          no_straggler_runtimes.append(runtime)
+      median_runtime = numpy.median(runtimes)
+      no_straggler_runtimes = [numpy.median(runtimes)] * len(stage.tasks)
       if id in self.stages_to_combine:
         runtimes_for_combined_stages.extend(no_straggler_runtimes)
       else:
@@ -393,40 +402,6 @@ class Analyzer:
       total_runtime += stage_total_runtime
     return total_disk_write_time * 1.0 / total_runtime
 
-  def write_network_and_disk_times_scatter(self, prefix):
-    """ Writes data and gnuplot file for a disk/network throughput scatter plot.
-    
-    Writes each individual transfer, so there are multiple data points for each task. """
-    # Data file.
-    network_filename = "%s_network_times.scatter" % prefix
-    network_file = open(network_filename, "w")
-    network_file.write("KB\tTime\n")
-    disk_filename = "%s_disk_times.scatter" % prefix
-    disk_file = open(disk_filename, "w")
-    disk_file.write("KB\tTime\n")
-    for stage in self.stages.values():
-      for task in stage.tasks:
-        if not task.has_fetch:
-          continue
-        for b, time in task.network_times:
-          network_file.write("%s\t%s\n" % (b / 1024., time))
-        for b, time in task.disk_times:
-          disk_file.write("%s\t%s\n" % (b / 1024., time))
-    network_file.close()
-    disk_file.close()
-
-    # Write plot file.
-    scatter_base_file = open("scatter_base.gp", "r")
-    plot_file = open("%s_net_disk_scatter.gp" % prefix, "w")
-    for line in scatter_base_file:
-      plot_file.write(line)
-    scatter_base_file.close()
-    plot_file.write("set output \"%s_scatter.pdf\"\n" % prefix)
-    plot_file.write("plot \"%s\" using 1:2 with dots title \"Network\",\\\n" %
-      network_filename)
-    plot_file.write("\"%s\" using 1:2 with p title \"Disk\"\n" % disk_filename)
-    plot_file.close()
-
   def write_task_write_times_scatter(self, prefix):
     filename = "%s_task_write_times.scatter" % prefix
     scatter_file = open(filename, "w")
@@ -583,8 +558,6 @@ def parse(filename, agg_results_filename=None):
 
   #analyzer.make_cdfs_for_performance_model(filename)
 
-  analyzer.write_network_and_disk_times_scatter(filename)
-  
   analyzer.write_waterfall(filename)
 
   # Compute the speedup for a fetch time of 1.0 as a sanity check!
@@ -634,10 +607,12 @@ def parse(filename, agg_results_filename=None):
     analyzer.replace_95_stragglers_with_median_speedup()
   no_stragglers_perfect_parallelism = \
     analyzer.no_stragglers_perfect_parallelism_speedup()
+  median_progress_rate_speedup = analyzer.median_progress_rate_speedup()
   print (("\nSpeedup from eliminating stragglers: %s (perfect parallelism) %s (use average) "
-    "%s (1.5=>med) %s (95%%ile=>med)") %
+    "%s (1.5=>med) %s (95%%ile=>med) %s (median progress rate)") %
     (no_stragglers_perfect_parallelism, no_stragglers_average_runtime_speedup,
-     no_stragglers_replace_with_median_speedup, no_stragglers_replace_95_with_median_speedup))
+     no_stragglers_replace_with_median_speedup, no_stragglers_replace_95_with_median_speedup,
+     median_progress_rate_speedup))
 
   simulated_versus_actual = analyzer.simulated_runtime_over_actual(filename)
   print "\n Simulated versus actual runtime: ", simulated_versus_actual
@@ -645,14 +620,14 @@ def parse(filename, agg_results_filename=None):
   if agg_results_filename != None:
     print "Adding results to %s" % agg_results_filename
     f = open(agg_results_filename, "a")
-    f.write("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (
+    f.write("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (
       filename.split("/")[1].split("_")[0],
       no_network_speedup, fraction_time_waiting_on_network, fraction_time_using_network,
       no_disk_speedup, fraction_time_waiting_on_disk, fraction_time_using_disk,
       no_compute_speedup, fraction_time_waiting_on_compute, fraction_time_computing,
       no_stragglers_average_runtime_speedup, no_stragglers_replace_with_median_speedup,
       no_stragglers_replace_95_with_median_speedup, no_stragglers_perfect_parallelism,
-      no_input_disk_speedup, simulated_versus_actual))
+      no_input_disk_speedup, simulated_versus_actual, median_progress_rate_speedup))
     f.close()
 
 

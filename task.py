@@ -32,12 +32,12 @@ class Task:
     INPUT_METHOD_KEY = "READ_METHOD"
     self.input_read_time = 0
     self.input_read_method = "unknown"
-    self.input_bytes = 0
+    self.input_mb = 0
     if INPUT_METHOD_KEY in items_dict:
       self.input_read_time = ((int(items_dict["READ_SETUP_TIME"]) +
         int(items_dict["READ_BLOCKED_TIME"])) / 1.0e6)
       self.input_read_method = items_dict["READ_METHOD"]
-      self.input_bytes = float(items_dict["INPUT_BYTES"]) / 1048576.
+      self.input_mb = float(items_dict["INPUT_BYTES"]) / 1048576.
 
     self.has_fetch = True
     if line.find("FETCH") < 0:
@@ -51,20 +51,15 @@ class Task:
     self.remote_mb_read = int(items_dict["REMOTE_BYTES_READ"]) / 1048576.
     self.local_mb_read = int(items_dict["LOCAL_READ_BYTES"]) / 1048576.
     self.local_read_time = int(items_dict["LOCAL_READ_TIME"])
-    
-    total_bytes_fetched = 0
-    self.total_time_fetching = 0
-    # Total disk read time across all fetches.
-    # TODO: To figure out whether disk is the problem, could do a slightly less rudimentary
-    # thing where for each individual fetch, we assume it started at the same time, and look
-    # at whether if we subtracted the disk time, we there would be no fetch wait time.
-    self.total_disk_read_time = 0
-    self.first_fetch_start = -1
-    # (bytes, disk read time) for each fetch.
-    self.disk_times = []
-    # (bytes, network time) for each fetch. The network time is the total fetch time
-    # minus the disk read time.
-    self.network_times = []
+    # TODO: This is not currently accurate due to page mapping.
+    self.remote_disk_read_time = int(items_dict["REMOTE_DISK_READ_TIME"])
+    self.total_time_fetching = int(items_dict["REMOTE_FETCH_TIME"])
+
+  def input_size_mb(self):
+    if self.has_fetch:
+      return self.remote_mb_read + self.local_mb_read
+    else:
+      return self.input_mb
 
   def network_time(self):
     """ Returns the amount of time this task spent using the network.
@@ -131,13 +126,13 @@ class Task:
     if self.has_fetch:
       base = self.start_time
       # Print times relative to the start time so that they're easier to read.
-      desc = (("Start time: %s, local read time: %s, first fetch start: %s, shuffle finish: %s, " +
+      desc = (("Start time: %s, local read time: %s, shuffle finish: %s, " +
             "fetch wait: %s, compute time: %s, gc time: %s, shuffle write time: %s, finish: %s, " +
-            "fraction disk time: %s") %
-             (self.start_time, self.local_read_time, self.first_fetch_start - base,
+            "fraction disk time: %s shuffle bytes: %s, input bytes: %s") %
+             (self.start_time, self.local_read_time,
               self.shuffle_finish_time - base, self.fetch_wait, self.gc_time,
               self.compute_time(), self.shuffle_write_time, self.finish_time - base,
-              self.fraction_time_disk())) 
+              self.fraction_time_disk(), self.local_mb_read + self.remote_mb_read, self.input_mb)) 
     else:
       desc = ("Start time: %s, finish: %s, gc time: %s, shuffle write time: %s" %
         (self.start_time, self.finish_time, self.gc_time, self.shuffle_write_time))
@@ -151,9 +146,9 @@ class Task:
 
   def fraction_time_disk(self):
     """ Should only be called for tasks with a fetch phase. """
-    if self.total_disk_read_time == 0:
+    if self.remote_disk_read_time == 0:
       return 0
-    return self.total_disk_read_time * 1.0 / self.total_time_fetching
+    return self.remote_disk_read_time * 1.0 / self.total_time_fetching
 
   def finish_time_no_disk_for_shuffle(self):
     """ Returns the task finish time if the shuffle data hadn't been written to or read from disk.
@@ -207,7 +202,7 @@ class Task:
     # The problem with doing the more accurate version where we simulate the entire fetch
     # process is that we need to exactly replicate the algorithm used by BlockFetcherIterator,
     # which is quite complex.
-    network_time = self.shuffle_finish_time - self.first_fetch_start
+    network_time = self.shuffle_finish_time - self.start_time
     faster_network_time = relative_fetch_time * network_time
     # During the shuffle, if we weren't waiting for the network, then we were computing.
     compute_time = network_time - self.fetch_wait
