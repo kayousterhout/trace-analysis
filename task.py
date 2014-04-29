@@ -75,7 +75,7 @@ class Task:
       return self.shuffle_finish_time - self.start_time - self.local_read_time
     return 0
 
-  def compute_time(self):
+  def compute_time_without_gc(self):
      """ Returns the time this task spent computing.
      
      Assumes shuffle writes don't get pipelined with task execution (TODO: verify this).
@@ -88,6 +88,14 @@ class Task:
        # this read happens before any of the computation starts.
        compute_time = compute_time - self.fetch_wait - self.local_read_time
      return compute_time
+
+  def compute_time(self):
+    """ Returns the time this task spent computing (potentially including GC time).
+
+    The reason we don't subtract out GC time here is that garbage collection may happen
+    during fetch wait.
+    """
+    return self.compute_time_without_gc() + self.gc_time
 
   def runtime_no_compute(self):
     """ Returns how long the task would have run for had it not done any computation. """
@@ -104,8 +112,9 @@ class Task:
     # We should be able to fix the logging to correct this issue.
     compute_wait_time = self.finish_time - self.start_time - self.shuffle_write_time - self.scheduler_delay - self.gc_time - self.input_read_time
     if self.has_fetch:
-      shuffle_time = self.shuffle_finish_time - self.start_time
-      compute_wait_time = compute_wait_time - shuffle_time
+      #shuffle_time = self.shuffle_finish_time - self.start_time
+      #compute_wait_time = compute_wait_time - shuffle_time
+      compute_wait_time = compute_wait_time - self.fetch_wait
     return self.runtime() - compute_wait_time
 
   def disk_time(self):

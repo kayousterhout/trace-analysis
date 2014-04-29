@@ -81,27 +81,42 @@ class Analyzer:
   def print_heading(self, text):
     print "\n******** %s ********" % text
 
-  def get_simulated_runtime(self):
+  def get_simulated_runtime(self, waterfall_prefix=""):
     """ Returns the simulated runtime for the job.
 
     This should be approximately the same as the original runtime of the job, except
     that it doesn't include scheduler delay.
+
+    If a non-empty waterfall_prefix is passed in, makes a waterfall plot based on the simulated
+    runtimes.
     """
     total_runtime = 0
     tasks_for_combined_stages = []
+    all_start_finish_times = []
     for id, stage in self.stages.iteritems():
       if id in self.stages_to_combine:
         tasks_for_combined_stages.extend(stage.tasks)
       else:
         tasks = sorted(stage.tasks, key = lambda task: task.start_time)
-        total_runtime += simulate.simulate([task.runtime() for task in tasks])[0]
+        simulated_runtime, start_finish_times = simulate.simulate([task.runtime() for task in tasks])
+        start_finish_times_adjusted = [
+          (start + total_runtime, finish + total_runtime) for start, finish in start_finish_times]
+        all_start_finish_times.append(start_finish_times_adjusted)
+        total_runtime += simulated_runtime
     if len(tasks_for_combined_stages) > 0:
       tasks = sorted(tasks_for_combined_stages, key = lambda task: task.start_time)
-      total_runtime += simulate.simulate([task.runtime() for task in tasks])[0]
+      simulated_runtime, start_finish_times = simulate.simulate([task.runtime() for task in tasks])
+      start_finish_times_adjusted = [
+        (start - simulated_runtime, finish - simulated_runtime) for start, finish in start_finish_times]
+      all_start_finish_times.append(start_finish_times_adjusted)
+      total_runtime += simulated_runtime
+
+    if waterfall_prefix:
+      self.write_simulated_waterfall(all_start_finish_times, "%s_simulated" % waterfall_prefix)
     return total_runtime 
 
-  def simulated_runtime_over_actual(self):
-    simulated_runtime = self.get_simulated_runtime()
+  def simulated_runtime_over_actual(self, prefix):
+    simulated_runtime = self.get_simulated_runtime(waterfall_prefix=prefix)
     # TODO: Incorporate Shark setup time here!
     actual_start_time = min([s.start_time for s in self.stages.values()])
     actual_finish_time = max([s.finish_time() for s in self.stages.values()])
@@ -111,10 +126,10 @@ class Analyzer:
   def no_stragglers_perfect_parallelism_speedup(self, num_slots=32):
     """ Returns how fast the job would have run if time were perfectly spread across 32 slots. """
     total_runtime = sum([s.total_runtime() for s in self.stages.values()])
-    finish_time = max([s.finish_time() for s in self.stages.values()])
-    start_time = min([s.start_time for s in self.stages.values()])
-    ideal_runtime = total_runtime * 1.0 / 32
-    return ideal_runtime / (finish_time - start_time)
+    ideal_runtime = total_runtime * 1.0 / num_slots
+    # Simulate the runtime rather than using the actual one to sidestep issues with # of slots.
+    simulated_actual_runtime = self.get_simulated_runtime()
+    return ideal_runtime / simulated_actual_runtime
 
   def no_stragglers_using_average_runtime_speedup(self, prefix):
     """ Returns how much faster the job would have run if there were no stragglers.
@@ -176,7 +191,7 @@ class Analyzer:
       else:
         no_stragglers_runtime = simulate.simulate(no_straggler_runtimes)[0]
         total_no_stragglers_runtime += no_stragglers_runtime
-        original_runtime = simulate.simulate([task.runtime() for task in stage.tasks])
+        original_runtime = simulate.simulate([task.runtime() for task in stage.tasks])[0]
         print "%s: Orig: %s, no stragg: %s" % (id, original_runtime, no_stragglers_runtime)
     if len(runtimes_for_combined_stages) > 0:
       total_no_stragglers_runtime += simulate.simulate(runtimes_for_combined_stages)[0]
@@ -509,13 +524,15 @@ class Analyzer:
         hdfs_read_end = deserialize_end + task.input_read_time
         local_read_end = hdfs_read_end
         fetch_wait_end = hdfs_read_end
-      compute_end = fetch_wait_end + task.compute_time()
+      # Here, assume GC happens as part of compute (although we know that sometimes
+      # GC happens during fetch wait.
+      compute_end = fetch_wait_end + task.compute_time_without_gc()
       gc_end = compute_end + task.gc_time
       task_end = gc_end + task.shuffle_write_time
       if math.fabs((first_start + task_end) - task.finish_time) >= 0.1:
         print "!!!!!!!!!!!!!!!!Mismatch at index %s" % i
         print task
-        #assert False
+        assert False
 
       # Write data to plot file.
       plot_file.write(LINE_TEMPLATE % (start, i, scheduler_delay_end, i, 6))
@@ -622,7 +639,7 @@ def parse(filename, agg_results_filename=None):
     (no_stragglers_perfect_parallelism, no_stragglers_average_runtime_speedup,
      no_stragglers_replace_with_median_speedup, no_stragglers_replace_95_with_median_speedup))
 
-  simulated_versus_actual = analyzer.simulated_runtime_over_actual()
+  simulated_versus_actual = analyzer.simulated_runtime_over_actual(filename)
   print "\n Simulated versus actual runtime: ", simulated_versus_actual
 
   if agg_results_filename != None:
