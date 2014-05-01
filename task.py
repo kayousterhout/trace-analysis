@@ -20,6 +20,13 @@ class Task:
       self.executor_deserialize_time - self.start_time)
     self.gc_time = int(items_dict["GC_TIME"])
     self.executor_deserialize_time = int(items_dict["EXECUTOR_DESERIALIZE_TIME"])
+    self.executor_id = int(items_dict["EXECUTOR_ID"])
+    self.deserialize_time_nanos = 0
+    self.serialize_time_nanos = 0
+    if "DESERIALIZATION_TIME_NANOS" in items_dict:
+      self.deserialize_time_nanos = int(items_dict["DESERIALIZATION_TIME_NANOS"])
+    if "SERIALIZATION_TIME_NANOS" in items_dict:
+      self.serialize_time_nanos = int(items_dict["SERIALIZATION_TIME_NANOS"])
 
     self.shuffle_write_time = 0
     self.shuffle_mb_written = 0
@@ -57,7 +64,7 @@ class Task:
 
   def input_size_mb(self):
     if self.has_fetch:
-      return self.remote_mb_read + self.local_mb_read
+      return max(1, self.remote_mb_read + self.local_mb_read)
     else:
       return self.input_mb
 
@@ -76,8 +83,7 @@ class Task:
      Assumes shuffle writes don't get pipelined with task execution (TODO: verify this).
      Does not include GC time.
      """
-     compute_time = (self.runtime() - self.scheduler_delay - self.executor_deserialize_time -
-       self.gc_time - self.shuffle_write_time - self.input_read_time)
+     compute_time = (self.runtime() - self.scheduler_delay - self.gc_time - self.shuffle_write_time - self.input_read_time)
      if self.has_fetch:
        # Subtract off of the time to read local data (which typically comes from disk) because
        # this read happens before any of the computation starts.
@@ -130,8 +136,8 @@ class Task:
             "fetch wait: %s, compute time: %s, gc time: %s, shuffle write time: %s, finish: %s, " +
             "fraction disk time: %s shuffle bytes: %s, input bytes: %s") %
              (self.start_time, self.local_read_time,
-              self.shuffle_finish_time - base, self.fetch_wait, self.gc_time,
-              self.compute_time(), self.shuffle_write_time, self.finish_time - base,
+              self.shuffle_finish_time - base, self.fetch_wait, self.compute_time(), self.gc_time,
+              self.shuffle_write_time, self.finish_time - base,
               self.fraction_time_disk(), self.local_mb_read + self.remote_mb_read, self.input_mb)) 
     else:
       desc = ("Start time: %s, finish: %s, gc time: %s, shuffle write time: %s" %
@@ -177,6 +183,9 @@ class Task:
   def runtime_no_input(self):
     new_finish_time = self.finish_time - self.input_read_time
     return new_finish_time - self.start_time
+
+  def runtime_no_shuffle_write(self):
+    return self.finish_time - self.shuffle_write_time - self.start_time
 
   def runtime_no_output(self):
     new_finish_time = self.finish_time - self.output_write_time

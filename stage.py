@@ -16,9 +16,10 @@ class Stage:
     else:
       input_method = self.tasks[0].input_read_method
     return (("%s tasks (avg runtime: %s, max runtime: %s) Start: %s, runtime: %s, "
-      "Input MB: %s (from %s), Output MB: %s") %
+      "Input MB: %s (from %s), Output MB: %s, Straggers: %s, HDFS straggers: %s") %
       (len(self.tasks), self.average_task_runtime(), max_task_runtime, self.start_time,
-       self.finish_time() - self.start_time, self.input_mb(), input_method, self.output_mb()))
+       self.finish_time() - self.start_time, self.input_mb(), input_method, self.output_mb(),
+       self.total_stragglers(), self.hdfs_read_stragglers()))
 
   def verbose_str(self):
     # Get info about the longest task.
@@ -47,6 +48,30 @@ class Stage:
 
   def total_disk_read_time(self):
     return sum([t.remote_disk_read_time for t in self.tasks if t.has_fetch])
+
+  def total_stragglers(self):
+    """ Returns the total number of straggler tasks for this stage. """
+    median_task_duration = numpy.median([t.runtime() for t in self.tasks])
+    stragglers = [t for t in self.tasks if t.runtime() >= 1.5*median_task_duration]
+    return len(stragglers)
+
+  def progress_rate_stragglers(self):
+    """ Returns the number of stragglers using progress rate to determine if a task is a straggler.
+    """
+    progress_rates = [t.runtime() * 1.0 / t.input_size_mb()
+      for t in self.tasks if t.input_size_mb() > 0]
+    median_progress_rate = numpy.median(progress_rates)
+    stragglers = [pr for pr in progress_rates if pr >= 1.5*median_progress_rate]
+    return len(stragglers)
+
+  def hdfs_read_stragglers(self):
+    """ Returns the number of stragglers caused by slow HDFS reads. """
+    median_task_duration = numpy.median([t.runtime() for t in self.tasks])
+    stragglers = [t for t in self.tasks if t.runtime() >= 1.5*median_task_duration]
+    times_wo_input_read = [t.runtime() - t.input_read_time for t in self.tasks]
+    median_time_wo_input_read = numpy.median(times_wo_input_read)
+    read_stragglers = [t for t in stragglers if t.runtime() - t.input_read_time < 1.5 * median_time_wo_input_read]
+    return len(read_stragglers)
 
   def task_runtimes_with_median_progress_rate(self):
     """ Returns task runtimes using the Dolly method to eliminate stragglers.

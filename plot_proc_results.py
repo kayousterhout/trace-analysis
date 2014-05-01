@@ -52,7 +52,7 @@ def write_running_tasks_plot(file_prefix, y2label, output_filename, running_task
   write_template(running_tasks_plot_file)
   running_tasks_plot_file.write("set xlabel \"Time (ms)\"\n")
   running_tasks_plot_file.write("set xrange [%s:%s]\n" %
-    (experiment_duration - 200000, experiment_duration))
+    (experiment_duration - 1200000, experiment_duration - 1000000))
   running_tasks_plot_file.write("set y2tics\n")
   running_tasks_plot_file.write("set y2label \"%s\"\n" % y2label)
   running_tasks_plot_file.write("set output \"%s/%s.pdf\"\n\n" % (file_prefix, output_filename))
@@ -207,6 +207,7 @@ def parse_proc_file(filename):
   print absolute_min_time
   earliest_time = min([pair[0] for pair in task_events if pair[0] > absolute_min_time])
   print earliest_time
+  earliest_time += 1000000
   latest_time = int(task_events[-1][0])
   for (time, event) in task_events:
     # Plot only the time delta -- makes the graph much easier to read.

@@ -124,6 +124,21 @@ class Analyzer:
     print "Simulated runtime: ", simulated_runtime, "actual time: ", actual_finish_time - actual_start_time
     return simulated_runtime * 1.0 / (actual_finish_time - actual_start_time)
 
+  def write_straggler_info(self, prefix):
+    """ Writes information about straggler causes to a file.""" 
+    filename = "%s_stragglers" % prefix
+
+    total_tasks = sum([len(s.tasks) for s in self.stages.values()])
+    total_stragglers = sum([s.total_stragglers() for s in self.stages.values()])
+    progress_rate_stragglers = sum([s.progress_rate_stragglers() for s in self.stages.values()])
+    total_hdfs_read_stragglers = sum([s.hdfs_read_stragglers() for s in self.stages.values()])
+    f = open(filename, "a")
+    f.write("%s\t%s\t%s\t%s\n" % (total_tasks, total_stragglers, progress_rate_stragglers, total_hdfs_read_stragglers))
+    f.close()
+    # Stragglers caused by garbage collection.
+    # Stragglers caused by data skew.
+    # Stragglers caused by JIT. 
+
   def median_progress_rate_speedup(self):
     """ Returns how fast the job would have run if all tasks had the median progress rate. """
     total_median_progress_rate_runtime = 0
@@ -220,7 +235,7 @@ class Analyzer:
       original_runtime = simulate.simulate(
         [x[1] for x in sorted(original_start_and_runtimes_for_combined_stages)])[0]
       print "Combined: Orig: %s, no stragg: %s" % (original_runtime, new_runtime)
-      total_no_stragglers_runtime += simulate.simulate(runtimes_for_combined_stages)[0]
+      total_no_stragglers_runtime += new_runtime
     return total_no_stragglers_runtime * 1.0 / self.get_simulated_runtime()
 
   def replace_stragglers_with_median_speedup(self):
@@ -345,6 +360,12 @@ class Analyzer:
       lambda t: t.runtime(),
       lambda t: t.runtime_no_input())
 
+  def no_shuffle_disk_speedup(self):
+    return self.calculate_speedup(
+      "Computing speedup without disk for shuffle",
+      lambda t: t.runtime(),
+      lambda t: t.runtime_no_shuffle_write())
+
   def fraction_time_waiting_on_disk(self):
     total_disk_wait_time = 0
     total_runtime = 0
@@ -383,6 +404,18 @@ class Analyzer:
         total_compute_time += task.compute_time()
         total_runtime += task.runtime()
     return total_compute_time * 1.0 / total_runtime
+
+  def fraction_time_serializing(self):
+    total_serialize_time = 0
+    total_runtime = 0
+    for stage in self.stages.values():
+      for task in stage.tasks:
+        serialize_time = task.serialize_time_nanos + task.deserialize_time_nanos
+        assert(serialize_time <= 1e6 * task.compute_time())
+        total_serialize_time += serialize_time
+        total_runtime += task.runtime()
+    serialize_time_millis = total_serialize_time / 1e6
+    return serialize_time_millis * 1.0 / total_runtime
 
   def fraction_time_gc(self):
     total_gc_time = 0
@@ -511,7 +544,7 @@ class Analyzer:
         fetch_wait_end = hdfs_read_end
       # Here, assume GC happens as part of compute (although we know that sometimes
       # GC happens during fetch wait.
-      compute_end = fetch_wait_end + task.compute_time_without_gc()
+      compute_end = fetch_wait_end + task.compute_time_without_gc() - task.executor_deserialize_time
       gc_end = compute_end + task.gc_time
       task_end = gc_end + task.shuffle_write_time
       if math.fabs((first_start + task_end) - task.finish_time) >= 0.1:
@@ -546,6 +579,21 @@ class Analyzer:
     plot_file.write("-1 ls 2 title 'Network wait', -1 ls 3 title 'Compute', \\\n")
     plot_file.write("-1 ls 4 title 'GC', -1 ls 5 title 'Disk write wait'\\\n")
     plot_file.close()
+
+  def write_stage_info(self, query_id, prefix):
+    f = open("%s_stage_info" % prefix, "a")
+    last_stage_runtime = -1
+    last_stage_finish_time = 0
+    for stage in self.stages.values():
+      if stage.finish_time() > last_stage_finish_time:
+        last_stage_finish_time = stage.finish_time()
+        last_stage_runtime = stage.finish_time() - stage.start_time
+
+    start_time = min([s.start_time for s in self.stages.values()])
+    finish_time = max([s.finish_time() for s in self.stages.values()])
+
+    f.write("%s\t%s\t%s\n" % (query_id, last_stage_runtime, finish_time - start_time))
+    f.close()
 
   def make_cdfs_for_performance_model(self, prefix):
     """ Writes plot files to create CDFS of the compute / network / disk rate. """
@@ -595,6 +643,7 @@ def parse(filename, agg_results_filename=None):
   no_disk_speedup = analyzer.no_disk_shuffle_speedup()
   print "Speedup from eliminating disk for shuffle: %s" % no_disk_speedup
   no_input_disk_speedup = analyzer.no_input_disk_speedup()
+  no_shuffle_disk_speedup = analyzer.no_shuffle_disk_speedup()
   print "Speedup from eliminating disk for input: %s" % no_input_disk_speedup
   fraction_time_waiting_on_disk = analyzer.fraction_time_waiting_on_disk()
   print "Fraction time waiting on disk: %s" % fraction_time_waiting_on_disk
@@ -609,6 +658,8 @@ def parse(filename, agg_results_filename=None):
   print "\nFraction of time waiting on compute: %s" % fraction_time_waiting_on_compute
   fraction_time_computing = analyzer.fraction_time_computing()
   print "\nFraction of time computing: %s" % fraction_time_computing
+  fraction_time_serializing = analyzer.fraction_time_serializing()
+  print "\nFraction of time serializing: %s" % fraction_time_serializing
   
   no_stragglers_average_runtime_speedup = analyzer.no_stragglers_using_average_runtime_speedup(
     filename)
@@ -630,15 +681,18 @@ def parse(filename, agg_results_filename=None):
   if agg_results_filename != None:
     print "Adding results to %s" % agg_results_filename
     f = open(agg_results_filename, "a")
-    f.write("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (
+    f.write("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (
       filename.split("/")[1].split("_")[0],
       no_network_speedup, fraction_time_waiting_on_network, fraction_time_using_network,
       no_disk_speedup, fraction_time_waiting_on_disk, fraction_time_using_disk,
-      no_compute_speedup, fraction_time_waiting_on_compute, fraction_time_computing,
+      no_compute_speedup, fraction_time_serializing, fraction_time_computing,
       no_stragglers_average_runtime_speedup, no_stragglers_replace_with_median_speedup,
       no_stragglers_replace_95_with_median_speedup, no_stragglers_perfect_parallelism,
-      no_input_disk_speedup, simulated_versus_actual, median_progress_rate_speedup))
+      no_input_disk_speedup, simulated_versus_actual, median_progress_rate_speedup,
+      no_shuffle_disk_speedup))
     f.close()
+    analyzer.write_straggler_info(agg_results_filename)
+    analyzer.write_stage_info(filename, agg_results_filename)
 
 
 def main(argv):
