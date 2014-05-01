@@ -99,7 +99,7 @@ class Analyzer:
         tasks_for_combined_stages.extend(stage.tasks)
       else:
         tasks = sorted(stage.tasks, key = lambda task: task.start_time)
-        simulated_runtime, start_finish_times = simulate.simulate([task.runtime() for task in tasks])
+        simulated_runtime, start_finish_times = simulate.simulate([t.runtime() for t in tasks])
         start_finish_times_adjusted = [
           (start + total_runtime, finish + total_runtime) for start, finish in start_finish_times]
         all_start_finish_times.append(start_finish_times_adjusted)
@@ -188,30 +188,40 @@ class Analyzer:
     Removes stragglers by replacing the longest 5% of tasks with the median runtime
     for tasks in the stage.
     """
+    self.print_heading("Computing speedup from replacing 5% slowest tasks with median")
     total_no_stragglers_runtime = 0
-    runtimes_for_combined_stages = []
+    start_and_runtimes_for_combined_stages = []
+    original_start_and_runtimes_for_combined_stages = []
     for id, stage in self.stages.iteritems():
       runtimes = [task.runtime() for task in stage.tasks]
-      runtimes.sort()
-      median_runtime = get_percentile(runtimes, 0.5)
-      threshold_runtime = get_percentile(runtimes, 0.95)
-      no_straggler_runtimes = []
-      for runtime in runtimes:
-        if runtime >= threshold_runtime:
-          no_straggler_runtimes.append(median_runtime)
+      median_runtime = numpy.percentile(runtimes, 50)
+      threshold_runtime = numpy.percentile(runtimes, 95)
+      no_straggler_start_and_runtimes = []
+      for task in sorted(stage.tasks, key = lambda t: t.runtime()):
+        if task.runtime >= threshold_runtime:
+          assert(median_runtime <= task.runtime)
+          no_straggler_start_and_runtimes.append((task.start_time, median_runtime))
         else:
-          no_straggler_runtimes.append(runtime)
+          no_straggler_start_and_runtimes.append((task.start_time, runtime))
       if id in self.stages_to_combine:
-        runtimes_for_combined_stages.extend(no_straggler_runtimes)
+        start_and_runtimes_for_combined_stages.extend(no_straggler_start_and_runtimes)
+        original_start_and_runtimes_for_combined_stages.extend(
+          [(t.start_time, t.runtime()) for t in stage.tasks])
       else:
-        no_stragglers_runtime = simulate.simulate(no_straggler_runtimes)[0]
+        no_stragglers_runtime = simulate.simulate(
+          [x[1] for x in no_straggler_start_and_runtimes])[0]
         total_no_stragglers_runtime += no_stragglers_runtime
         original_runtime = simulate.simulate([task.runtime() for task in stage.tasks])[0]
         print "%s: Orig: %s, no stragg: %s" % (id, original_runtime, no_stragglers_runtime)
-    if len(runtimes_for_combined_stages) > 0:
+    if len(start_and_runtimes_for_combined_stages) > 0:
+      start_and_runtimes_for_combined_stages.sort()
+      runtimes_for_combined_stages = [x[1] for x in start_and_runtimes_for_combined_stages]
+      new_runtime = simulate.simulate(runtimes_for_combined_stages)[0]
+      original_runtime = simulate.simulate(
+        [x[1] for x in sorted(original_start_and_runtimes_for_combined_stages)])[0]
+      print "Combined: Orig: %s, no stragg: %s" % (original_runtime, new_runtime)
       total_no_stragglers_runtime += simulate.simulate(runtimes_for_combined_stages)[0]
     return total_no_stragglers_runtime * 1.0 / self.get_simulated_runtime()
-
 
   def replace_stragglers_with_median_speedup(self):
     """ Returns how much faster the job would have run if there were no stragglers.
