@@ -6,6 +6,7 @@ import sys
 import simulate
 import stage
 import task
+from collections import namedtuple
 
 """ Returns the "percent" percentile in the list N.
 
@@ -407,6 +408,112 @@ class Analyzer:
     plot_file.write("-1 ls 2 title 'Network wait', -1 ls 3 title 'Compute', \\\n")
     plot_file.write("-1 ls 4 title 'GC', -1 ls 5 title 'Disk write wait'\\\n")
     plot_file.close()
+
+def eq(f1, f2):
+    from numpy import allclose
+    return allclose(f1, f2)
+
+class AbstractTask:
+    
+    def __init__(self, start, stop, elapsed_time_by_name, is_reduce):
+        '''
+        start -- int
+        stop -- int
+        elapsed_time_by_name -- {resource name (T) : resource elapsed time (float)}
+        '''
+        self.start = start
+        self.stop = stop
+        self.elapsed_time_by_name = elapsed_time_by_name
+        self.is_reduce = 'SHUFFLE' in elapsed_time_by_name or 'FAKE_SHUFFLE' in elapsed_time_by_name
+        
+        sum_times = sum(time for (_, time) in elapsed_time_by_name.iteritems())
+        self.elapsed = self.stop - self.start
+        assert(eq(sum_times, self.elapsed)), '%f != %f' %(sum_times, self.elapsed)
+
+    def _sum_times(self, times_by_name):
+        return sum(time for (_, time) in times_by_name.iteritems())
+
+    def portion(self, name):
+        return self.elapsed_time_by_name.get(name, 0) / float(self.elapsed)
+
+    def without(self, to_exclude, start_time):
+        resources = {name : time for (name, time) in self.elapsed_time_by_name.iteritems() if name not in to_exclude}
+        return AbstractTask(start_time, start_time + self._sum_times(resources), resources, self.is_reduce)
+
+    def shift_start(self, delta):
+        return AbstractTask(self.start + delta, self.stop + delta, self.elapsed_time_by_name, self.is_reduce)
+
+    def reduce_resource(self, resource, max_length):
+        assert(resource in self.elapsed_time_by_name)
+        def shrinker(candidate, old):
+            if candidate == resource:
+                return min(old, max_length)
+            else:
+                return old
+
+        new_resources = {k: shrinker(k, v) for (k, v) in self.elapsed_time_by_name.iteritems()}
+        return AbstractTask(self.start, self.start + self._sum_times(new_resources), new_resources, self.is_reduce)
+
+    def switch(self, old_resource, new_resource):
+        assert(old_resource in self.elapsed_time_by_name)
+        def change(candidate):
+            return new_resource if candidate == old_resource else candidate
+        return AbstractTask(self.start, self.stop, {change(k): v for (k, v) in self.elapsed_time_by_name.iteritems()}, self.is_reduce)
+
+    def __repr__(self):
+        return {'start' : self.start, 'stop' : self.stop, 'resources' : self.elapsed_time_by_name}.__repr__()
+    
+Arrow = namedtuple('Arrow', ['start', 'stop', 'resource'])
+        
+def arrows(abstract_tasks):
+    '''
+    return a list [[Arrow]]
+    '''    
+    
+    def row_arrows(task):
+        start = task.start
+        for (name, time) in task.elapsed_time_by_name.iteritems():
+            yield Arrow(start, start + time, name)
+            start = start + time
+    
+    return [list(row_arrows(task)) for task in abstract_tasks]
+        
+        
+def waterfall_output(arrow_lists, style_map):
+    LINE_TEMPLATE = "set arrow from %s,%s to %s,%s ls %d nohead\n"
+    
+    def make_arrow(row, start, stop, style):
+        return LINE_TEMPLATE %(start, row, stop, row, style)
+
+    for (row, arrow_list) in enumerate(arrow_lists):
+        for (start, stop, name) in arrow_list:
+            yield make_arrow(row, start, stop, style_map[name])
+    
+def make_waterfall(prefix, abstract_tasks, style):
+    #print abstract_tasks
+    base_file = open("waterfall_base.gp", "r")
+    plot_file_name = "%s_waterfall.gp" % prefix
+    plot_file = open(plot_file_name, "w")
+    for line in base_file:
+        plot_file.write(line)
+    base_file.close()
+    
+    for line in waterfall_output(arrows(abstract_tasks), style):
+        plot_file.write(line)
+        
+    #plot_file.write("set ytics (%s)\n" % ytics_str)
+    plot_file.write("set xrange [0:%f]\n" % (max(t.stop for t in abstract_tasks)))
+    plot_file.write("set yrange [0:%f]\n" % len(abstract_tasks))
+    plot_file.write("set output \"%s_waterfall.pdf\"\n" % prefix)
+
+        
+    # Hacky way to force a key to be printed.
+    titles = ', '.join("-1 ls %d title '%s'" %(style, name) for (name, style) in style.iteritems())
+    plot_file.write("plot " + titles)
+
+    plot_file.close()
+    import os
+    os.system('gnuplot %s' %plot_file_name)
 
 def main(argv):
   if len(argv) < 2:
