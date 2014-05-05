@@ -59,7 +59,8 @@ class Task:
     self.local_mb_read = int(items_dict["LOCAL_READ_BYTES"]) / 1048576.
     self.local_read_time = int(items_dict["LOCAL_READ_TIME"])
     # TODO: This is not currently accurate due to page mapping.
-    self.remote_disk_read_time = int(items_dict["REMOTE_DISK_READ_TIME"])
+    self.remote_disk_read_time = 0
+      #int(items_dict["REMOTE_DISK_READ_TIME"])
     self.total_time_fetching = int(items_dict["REMOTE_FETCH_TIME"])
 
   def input_size_mb(self):

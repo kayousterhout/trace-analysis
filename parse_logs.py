@@ -585,7 +585,10 @@ class Analyzer:
     last_stage_runtime = -1
     last_stage_finish_time = 0
     for stage in self.stages.values():
-      if stage.finish_time() > last_stage_finish_time:
+      # This is a hack! Count the most recent stage with runtime > 1s as the "last".
+      # Shark produces 1-2 very short stages at the end that do not seem to do anything (and
+      # certainly aren't doing the output write we're trying to account for).
+      if (stage.finish_time() - stage.start_time) > 1000 and stage.finish_time() > last_stage_finish_time:
         last_stage_finish_time = stage.finish_time()
         last_stage_runtime = stage.finish_time() - stage.start_time
 
