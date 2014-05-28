@@ -46,6 +46,17 @@ class Analyzer:
         stage_id = stage_id_and_suffix[:stage_id_and_suffix.find(" ")]
         self.stages[stage_id].add_event(line)
 
+    # Drop empty stages.
+    stages_to_drop = []
+    for id, s in self.stages.iteritems():
+      if len(s.tasks) == 0:
+        stages_to_drop.append(id)
+    print stages_to_drop
+    print self.stages
+    for id in stages_to_drop:
+      print "Dropping stage %s" % id
+      del self.stages[id]
+
     # Compute the amount of overlapped time between stages
     # (there should just be two stages, at the beginning, that overlap and run concurrently).
     # This computation assumes that not more than two stages overlap.
@@ -406,6 +417,7 @@ class Analyzer:
     return total_compute_time * 1.0 / total_runtime
 
   def fraction_time_serializing(self):
+    """ Returns the fraction of time spent serializing and deserializing data. """
     total_serialize_time = 0
     total_runtime = 0
     for stage in self.stages.values():
@@ -416,6 +428,18 @@ class Analyzer:
         total_runtime += task.runtime()
     serialize_time_millis = total_serialize_time / 1e6
     return serialize_time_millis * 1.0 / total_runtime
+
+  def fraction_time_deserializing(self):
+    """ Returns the fraction of time spent deserializing data. """
+    total_deserialize_time = 0
+    total_runtime = 0
+    for stage in self.stages.values():
+      for task in stage.tasks:
+        serialize_time = task.deserialize_time_nanos
+        total_deserialize_time += serialize_time
+        total_runtime += task.runtime()
+    deserialize_time_millis = total_deserialize_time / 1e6
+    return deserialize_time_millis * 1.0 / total_runtime
 
   def fraction_time_gc(self):
     total_gc_time = 0
@@ -529,7 +553,8 @@ class Analyzer:
     first_start = all_tasks[0].start_time
     for i, task in enumerate(all_tasks):
       start = task.start_time - first_start
-      # Show the scheduler delay at the beginning -- but it could be at the beginning or end or split.
+      # Show the scheduler delay at the beginning -- but it could be at the beginning or end or
+      # split.
       scheduler_delay_end = start + task.scheduler_delay
       deserialize_end = scheduler_delay_end + task.executor_deserialize_time
       hdfs_read_end = deserialize_end
@@ -549,6 +574,8 @@ class Analyzer:
       task_end = gc_end + task.shuffle_write_time
       if math.fabs((first_start + task_end) - task.finish_time) >= 0.1:
         print "!!!!!!!!!!!!!!!!Mismatch at index %s" % i
+        print "%.1f" % (first_start + task_end)
+        print task.finish_time
         print task
         assert False
 
@@ -663,6 +690,9 @@ def parse(filename, agg_results_filename=None):
   print "\nFraction of time computing: %s" % fraction_time_computing
   fraction_time_serializing = analyzer.fraction_time_serializing()
   print "\nFraction of time serializing: %s" % fraction_time_serializing
+
+  fraction_time_deserializing = analyzer.fraction_time_deserializing()
+  print "\nFraction time just deserializing: %s" % fraction_time_deserializing
   
   no_stragglers_average_runtime_speedup = analyzer.no_stragglers_using_average_runtime_speedup(
     filename)

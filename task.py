@@ -19,7 +19,6 @@ class Task:
     self.scheduler_delay = (self.finish_time - self.executor_run_time -
       self.executor_deserialize_time - self.start_time)
     self.gc_time = int(items_dict["GC_TIME"])
-    self.executor_deserialize_time = int(items_dict["EXECUTOR_DESERIALIZE_TIME"])
     self.executor_id = int(items_dict["EXECUTOR_ID"])
     self.deserialize_time_nanos = 0
     self.serialize_time_nanos = 0
