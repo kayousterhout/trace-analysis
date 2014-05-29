@@ -569,7 +569,10 @@ class Analyzer:
         fetch_wait_end = hdfs_read_end
       # Here, assume GC happens as part of compute (although we know that sometimes
       # GC happens during fetch wait.
-      compute_end = fetch_wait_end + task.compute_time_without_gc() - task.executor_deserialize_time
+      serialize_millis = (task.deserialize_time_nanos + task.serialize_time_nanos) / 1e6
+      serialize_end = fetch_wait_end + serialize_millis
+      compute_end = (serialize_end + task.compute_time_without_gc() - serialize_millis -
+        task.executor_deserialize_time)
       gc_end = compute_end + task.gc_time
       task_end = gc_end + task.shuffle_write_time
       if math.fabs((first_start + task_end) - task.finish_time) >= 0.1:
@@ -585,10 +588,11 @@ class Analyzer:
       if task.has_fetch:
         plot_file.write(LINE_TEMPLATE % (deserialize_end, i, local_read_end, i, 1))
         plot_file.write(LINE_TEMPLATE % (local_read_end, i, fetch_wait_end, i, 2))
-        plot_file.write(LINE_TEMPLATE % (fetch_wait_end, i, compute_end, i, 3))
+        plot_file.write(LINE_TEMPLATE % (fetch_wait_end, i, serialize_end, i, 9))
       else:
         plot_file.write(LINE_TEMPLATE % (deserialize_end, i, hdfs_read_end, i, 7))
-        plot_file.write(LINE_TEMPLATE % (hdfs_read_end, i, compute_end, i, 3))
+        plot_file.write(LINE_TEMPLATE % (hdfs_read_end, i, serialize_end, i, 9))
+      plot_file.write(LINE_TEMPLATE % (serialize_end, i, compute_end, i, 3))
       plot_file.write(LINE_TEMPLATE % (compute_end, i, gc_end, i, 4))
       plot_file.write(LINE_TEMPLATE % (gc_end, i, task_end, i, 5))
 
@@ -604,7 +608,8 @@ class Analyzer:
     plot_file.write(" -1 ls 8 title 'Task deserialization', -1 ls 7 title 'HDFS read',\\\n")
     plot_file.write("-1 ls 1 title 'Local read wait',\\\n")
     plot_file.write("-1 ls 2 title 'Network wait', -1 ls 3 title 'Compute', \\\n")
-    plot_file.write("-1 ls 4 title 'GC', -1 ls 5 title 'Disk write wait'\\\n")
+    plot_file.write("-1 ls 9 title 'Data (de)serialization', -1 ls 4 title 'GC', \\\n")
+    plot_file.write("-1 ls 5 title 'Disk write wait'\\\n")
     plot_file.close()
 
   def write_stage_info(self, query_id, prefix):
