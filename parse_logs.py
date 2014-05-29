@@ -218,34 +218,44 @@ class Analyzer:
     total_no_stragglers_runtime = 0
     start_and_runtimes_for_combined_stages = []
     original_start_and_runtimes_for_combined_stages = []
+    num_stragglers_combined_stages = 0
     for id, stage in self.stages.iteritems():
       runtimes = [task.runtime() for task in stage.tasks]
       median_runtime = numpy.percentile(runtimes, 50)
       threshold_runtime = numpy.percentile(runtimes, 95)
       no_straggler_start_and_runtimes = []
+      num_stragglers = 0
       for task in sorted(stage.tasks, key = lambda t: t.runtime()):
-        if task.runtime >= threshold_runtime:
-          assert(median_runtime <= task.runtime)
+        if task.runtime() >= threshold_runtime:
+          assert(median_runtime <= task.runtime())
           no_straggler_start_and_runtimes.append((task.start_time, median_runtime))
+          num_stragglers += 1 
         else:
-          no_straggler_start_and_runtimes.append((task.start_time, runtime))
+          no_straggler_start_and_runtimes.append((task.start_time, task.runtime()))
       if id in self.stages_to_combine:
         start_and_runtimes_for_combined_stages.extend(no_straggler_start_and_runtimes)
         original_start_and_runtimes_for_combined_stages.extend(
           [(t.start_time, t.runtime()) for t in stage.tasks])
+        num_stragglers_combined_stages += num_stragglers
       else:
         no_stragglers_runtime = simulate.simulate(
           [x[1] for x in no_straggler_start_and_runtimes])[0]
         total_no_stragglers_runtime += no_stragglers_runtime
         original_runtime = simulate.simulate([task.runtime() for task in stage.tasks])[0]
-        print "%s: Orig: %s, no stragg: %s" % (id, original_runtime, no_stragglers_runtime)
+        print ("%s: Original: %s, Orig (sim): %s, no stragg: %s (%s stragglers)" %
+          (id, stage.finish_time() - stage.start_time, original_runtime, no_stragglers_runtime,
+           num_stragglers))
     if len(start_and_runtimes_for_combined_stages) > 0:
+      original_start_time = min([x[0] for x in start_and_runtimes_for_combined_stages])
+      original_finish_time = max([x[0] + x[1] for x in start_and_runtimes_for_combined_stages])
       start_and_runtimes_for_combined_stages.sort()
       runtimes_for_combined_stages = [x[1] for x in start_and_runtimes_for_combined_stages]
       new_runtime = simulate.simulate(runtimes_for_combined_stages)[0]
       original_runtime = simulate.simulate(
         [x[1] for x in sorted(original_start_and_runtimes_for_combined_stages)])[0]
-      print "Combined: Orig: %s, no stragg: %s" % (original_runtime, new_runtime)
+      print ("Combined: Original: %s, Orig (sim): %s, no stragg: %s (%s stragglers)" %
+        (original_finish_time - original_start_time, original_runtime, new_runtime,
+         num_stragglers_combined_stages))
       total_no_stragglers_runtime += new_runtime
     return total_no_stragglers_runtime * 1.0 / self.get_simulated_runtime()
 
@@ -708,7 +718,7 @@ def parse(filename, agg_results_filename=None):
     analyzer.no_stragglers_perfect_parallelism_speedup()
   median_progress_rate_speedup = analyzer.median_progress_rate_speedup()
   print (("\nSpeedup from eliminating stragglers: %s (perfect parallelism) %s (use average) "
-    "%s (1.5=>med) %s (95%%ile=>med) %s (median progress rate)") %
+    "%s (use median) %s (95%%ile=>med) %s (median progress rate)") %
     (no_stragglers_perfect_parallelism, no_stragglers_average_runtime_speedup,
      no_stragglers_replace_with_median_speedup, no_stragglers_replace_95_with_median_speedup,
      median_progress_rate_speedup))
