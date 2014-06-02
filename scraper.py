@@ -16,6 +16,9 @@ import time
 import calendar
 import scheduler
 import os
+from numpy import percentile
+
+median = lambda lst: percentile(lst, 50)
 
 TIMER_REGEX = compile('magic=ryanlog.*?data=({.*})')
 MS_REGEX = compile(r'(2014.*),([0-9]{3,3})')
@@ -295,34 +298,116 @@ class remove_fn(tuple):
     def __call__(self, task, start_time):
         return task.without(self, start_time)
 
-def do_it_all(out_folder_name, in_files, do_test):
-    if do_test:
-        # spill, disk, spill+disk and network, shuffle, network+shuffle
-        TO_TEST = [remove_fn(tuple(x)) for x in [['TEST'], ['SHUFFLE'], ['DISK'], ['NETWORK'], ['SPILL'], ['DISK', 'SPILL'], ['NETWORK', 'SHUFFLE'], ['SHUFFLE', 'DISK', 'NETWORK', 'SPILL']]]
-    else:
-        TO_TEST = []
+    def with_tasks(self, tasks):
+        return self
+
+DUMB_REMOVE = [g for g in GROUP_LIST if g not in ['SHUFFLE', 'FAKE_SHUFFLE']]
+MY_REMOVE = [g for g in GROUP_LIST if g not in ['SHUFFLE', 'FAKE_SHUFFLE', 'CPU']]
+
+class reduce_remove_fn(tuple):
+
+    def __init__(self, to_remove, name):
+        self.to_remove = to_remove
+
+    def __new__(cls, to_remove, name):
+        return tuple.__new__(cls, [name])
+
+    def __call__(self, task, start_time):
+        if task.is_reduce:
+            return task.without(self.to_remove, start_time)
+        else:
+            return task.without([], start_time)
+
+    def with_tasks(self, tasks):
+        return self
+
+MY_REMOVE_FN = reduce_remove_fn(MY_REMOVE, 'real')
+DUMB_REMOVE_FN = reduce_remove_fn(DUMB_REMOVE, 'bad_assumption')
+
+WRITE_RESOURCES = ['DISK', 'NETWORK', 'SPILL', 'UNKNOWN', 'GC']
+
+def reduce_times(tasks):
+    '''
+    get difference in reduce times between real and "dumb" way
+    '''
+    def real(task):
+        return task.time_in(WRITE_RESOURCES)
+
+    def bad_assumption(task):
+        return task.elapsed - task.time_in(['SHUFFLE'])
+
+    return [[task.elapsed / 1000., bad_assumption(task) / 1000., real(task) / 1000.] for task in tasks if task.is_reduce]
+
+TO_TEST = [remove_fn(tuple(x)) for x in [['TEST'], ['SHUFFLE'], ['DISK'], ['NETWORK'], ['SPILL'], ['DISK', 'SPILL'], ['DISK', 'NETWORK'], ['NETWORK', 'SHUFFLE'], ['SHUFFLE', 'DISK', 'NETWORK', 'SPILL']]]
+
+def do_it_all(out_folder_name, in_files, TO_TEST, job_mutator=None):
     jobs = to_jobs(in_files)
     results = {}
-    for qid, job in jobs.iteritems():
+
+    def do_orig(job, name='original', total=None):
         orig = flatten(order(job))
         total_time = time_taken(orig)
-        results[qid] = {'original' : str((total_time, '100.00%'))}
-        make_waterfall('%s/%s_original' %(out_folder_name, qid), orig, STYLES)
+        if total is None:
+            percent = 100
+        else:
+            percent = 100 * total_time / float(total)
+        results[qid][name] = str((total_time, '%.2f%%' % (percent)))
+        make_waterfall('%s/%s_%s' %(out_folder_name, qid, name), orig, STYLES)
+        return total_time
+
+    for qid, job in jobs.iteritems():
+        results[qid] = {}
+        total_time = do_orig(job)
+        if job_mutator is not None:
+            do_orig(job_mutator(job), 'map_only', total_time)
 
         for to_remove in TO_TEST:
             additional = '-'.join(to_remove)
-            sped_up = speed_ups(job, to_remove, scheduler.schedule)
+            sped_up = speed_ups(job, to_remove, scheduler.schedule_simple)
             what_if = flatten(sped_up)
             make_waterfall(out_folder_name + '/%s_%s' %(qid, additional), what_if, STYLES)
             time = time_taken(what_if)
             results[qid][str(to_remove)] = str((time, '%.2f%%' %(100.*float(time)/total_time)))
     return results
 
+class Medianizer(tuple):
+
+    def __new__(cls):
+        return tuple.__new__(cls, ['medianized'])
+
+    def with_tasks(self, tasks):
+        return medianize_tasks_remover(tasks)
+
+
+def medianize_tasks_remover(tasks):
+    map_task_elapsed = [task.elapsed for task in tasks if not task.is_reduce]
+    map_median = median(map_task_elapsed)
+    if len(map_task_elapsed) < len(tasks):
+        reduce_median = median([task.elapsed for task in tasks if task.is_reduce])
+
+    def medianize_task(task, start_time):
+        if not task.is_reduce:
+            return task.change_elapsed(start_time, map_median)
+        else:
+            return task.change_elapsed(start_time, reduce_median)
+
+    return medianize_task
+
+def map_only_jobs(job):
+    for tasks in job:
+        for (i, task) in enumerate(tasks):
+            print 'is reduce ? %d: %s' %(i, task.is_reduce)
+    new_job = [[task for task in tasks if not task.is_reduce] for tasks in job]
+    return new_job
+
+
 def time_taken_ms(tasks):
     return max(t.stop for t in tasks)
 
+
 def time_taken(tasks):
     return max(t.stop for t in tasks) / 1000.
+
 
 def main():
     from argparse import ArgumentParser
@@ -333,11 +418,40 @@ def main():
     parser.add_argument('-w', '--what-if', type=parse_exclude, default=[])
     parser.add_argument('-d', '--debug', default=False, action='store_true')
     parser.add_argument('-b', '--batch', type=str, default='')
+    parser.add_argument('-r', '--dumb-reduce', type=str, default='')
+    parser.add_argument('-m', '--map-only', type=str, default='')
+    parser.add_argument('--medianize', type=str, default='')
+    parser.add_argument('-f', '--fake', type=str, default='')
 
     args = parser.parse_args()
 
+    if args.fake != '':
+        summary = do_it_all(args.fake , args.logfiles, [remove_fn(['FAKE_SHUFFLE']), remove_fn(['TEST'])])
+        with open(os.path.join(args.fake, 'summary.json'), 'w+') as f:
+            json.dump(summary, f, indent=1, sort_keys=True)
+        return
+
+    if args.medianize != '':
+        summary = do_it_all(args.medianize , args.logfiles, [Medianizer(), remove_fn(['TEST'])])
+        with open(os.path.join(args.medianize, 'summary.json'), 'w+') as f:
+            json.dump(summary, f, indent=1, sort_keys=True)
+        return
+
+    if args.map_only != '':
+        summary = do_it_all(args.map_only, args.logfiles, [], job_mutator=map_only_jobs)
+        with open(os.path.join(args.map_only, 'summary.json'), 'w+') as f:
+            json.dump(summary, f, indent=1, sort_keys=True)
+        return
+
+    if args.dumb_reduce != '':
+        jobs = to_jobs(args.logfiles)
+        to_write = {k: reduce_times(flatten(job)) for (k, job) in jobs.iteritems()}
+        with open(args.dumb_reduce, 'w+') as f:
+            json.dump(to_write, f, indent=1, sort_keys=True)
+        return
+
     if args.batch != '':
-        summary = do_it_all(args.batch, args.logfiles, True)
+        summary = do_it_all(args.batch, args.logfiles, TO_TEST)
         with open(os.path.join(args.batch, 'summary.json'), 'w+') as f:
             json.dump(summary, f, indent=1, sort_keys=True)
         return

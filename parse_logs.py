@@ -460,6 +460,17 @@ class AbstractTask:
             return new_resource if candidate == old_resource else candidate
         return AbstractTask(self.start, self.stop, {change(k): v for (k, v) in self.elapsed_time_by_name.iteritems()}, self.is_reduce)
 
+    def time_in(self, resources):
+        return sum(time for (name, time) in self.elapsed_time_by_name.iteritems() if name in resources)
+
+    def change_elapsed(self, start, new_elapsed):
+        scale_factor = new_elapsed / float(self.elapsed)
+        new_times_by_name = {k: v * scale_factor for (k, v) in self.elapsed_time_by_name.iteritems()}
+        return AbstractTask(start, start + new_elapsed, new_times_by_name, self.is_reduce)
+
+    def has(self, resource):
+        return resource in self.elapsed_time_by_name
+
     def __repr__(self):
         return {'start' : self.start, 'stop' : self.stop, 'resources' : self.elapsed_time_by_name}.__repr__()
     
