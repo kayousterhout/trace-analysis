@@ -51,8 +51,6 @@ class Analyzer:
     for id, s in self.stages.iteritems():
       if len(s.tasks) == 0:
         stages_to_drop.append(id)
-    print stages_to_drop
-    print self.stages
     for id in stages_to_drop:
       print "Dropping stage %s" % id
       del self.stages[id]
@@ -135,16 +133,55 @@ class Analyzer:
     print "Simulated runtime: ", simulated_runtime, "actual time: ", actual_finish_time - actual_start_time
     return simulated_runtime * 1.0 / (actual_finish_time - actual_start_time)
 
-  def write_straggler_info(self, prefix):
+  def write_data_to_file(self, data, file_handle):
+    stringified_data = [str(x) for x in data]
+    stringified_data += "\n"
+    file_handle.write("\t".join(stringified_data))
+
+  def write_straggler_info(self, job_name, prefix):
     """ Writes information about straggler causes to a file.""" 
     filename = "%s_stragglers" % prefix
 
     total_tasks = sum([len(s.tasks) for s in self.stages.values()])
+    total_runtime = sum([s.total_runtime() for s in self.stages.values()])
     total_stragglers = sum([s.total_stragglers() for s in self.stages.values()])
-    progress_rate_stragglers = sum([s.progress_rate_stragglers() for s in self.stages.values()])
-    total_hdfs_read_stragglers = sum([s.hdfs_read_stragglers() for s in self.stages.values()])
+    total_straggler_time = sum([s.total_straggler_runtime() for s in self.stages.values()])
+    progress_rate_straggler_info = [s.progress_rate_stragglers() for s in self.stages.values()]
+    progress_rate_straggler_count = sum([x[0] for x in progress_rate_straggler_info])
+    progress_rate_straggler_time = sum([x[1] for x in progress_rate_straggler_info])
+    hdfs_read_stragglers_info = [s.hdfs_read_stragglers() for s in self.stages.values()]
+    hdfs_read_stragglers_count = sum([x[0] for x in hdfs_read_stragglers_info])
+    hdfs_read_stragglers_time = sum([x[1] for x in hdfs_read_stragglers_info])
+
+    gc_straggler_info = [s.gc_stragglers() for s in self.stages.values()]
+    gc_straggler_count = sum([x[0] for x in gc_straggler_info])
+    gc_straggler_time = sum([x[1] for x in gc_straggler_info])
+
+    network_straggler_info = [s.network_stragglers() for s in self.stages.values()]
+    network_straggler_count = sum([x[0] for x in network_straggler_info])
+    network_straggler_time = sum([x[1] for x in network_straggler_info])
+
+    scheduler_delay_straggler_info = [s.scheduler_delay_stragglers() for s in self.stages.values()]
+    scheduler_delay_straggler_count = sum([x[0] for x in scheduler_delay_straggler_info])
+    scheduler_delay_straggler_time = sum([x[1] for x in scheduler_delay_straggler_info])
+
+    jit_straggler_count = sum([s.jit_stragglers() for s in self.stages.values()])
+
+    all_stragglers = []
+    for s in self.stages.values():
+      all_stragglers.extend(s.get_stragglers())
+    explained_stragglers = [t for t in all_stragglers if t.straggler_behavior_explained]
+
     f = open(filename, "a")
-    f.write("%s\t%s\t%s\t%s\n" % (total_tasks, total_stragglers, progress_rate_stragglers, total_hdfs_read_stragglers))
+    data_to_write = [job_name, total_tasks, total_runtime, total_stragglers, total_straggler_time,
+      len(explained_stragglers), len(all_stragglers),
+      progress_rate_straggler_count, progress_rate_straggler_time, hdfs_read_stragglers_count,
+      hdfs_read_stragglers_time,
+      gc_straggler_count, gc_straggler_time,
+      network_straggler_count, network_straggler_time,
+      scheduler_delay_straggler_count, scheduler_delay_straggler_time,
+      jit_straggler_count]
+    self.write_data_to_file(data_to_write, f)
     f.close()
     # Stragglers caused by garbage collection.
     # Stragglers caused by data skew.
@@ -172,7 +209,7 @@ class Analyzer:
     simulated_actual_runtime = self.get_simulated_runtime()
     return ideal_runtime / simulated_actual_runtime
 
-  def no_stragglers_using_average_runtime_speedup(self, prefix):
+  def replace_all_tasks_with_average_speedup(self, prefix):
     """ Returns how much faster the job would have run if there were no stragglers.
 
     Eliminates stragglers by replacing each task's runtime with the average runtime
@@ -208,13 +245,17 @@ class Analyzer:
     self.write_simulated_waterfall(all_start_finish_times, "%s_sim_no_stragglers" % prefix)
     return total_no_stragglers_runtime * 1.0 / self.get_simulated_runtime()
 
-  def replace_95_stragglers_with_median_speedup(self):
+  def replace_stragglers_with_median_speedup(self, threshold_fn):
     """ Returns how much faster the job would have run if there were no stragglers.
 
-    Removes stragglers by replacing the longest 5% of tasks with the median runtime
-    for tasks in the stage.
+    For each stage, passes the list of task runtimes into threshold_fn, which should
+    return a threshold runtime. Then, replaces all task runtimes greater than the given
+    threshold with the median runtime.
+
+    For example, to replace the tasks with the longest 5% of runtimes with the median:
+      self.replace_stragglers_with_median_speedup(lambda runtimes: numpy.percentile(runtimes, 95)
     """
-    self.print_heading("Computing speedup from replacing 5% slowest tasks with median")
+    self.print_heading("Computing speedup from replacing straggler tasks with median")
     total_no_stragglers_runtime = 0
     start_and_runtimes_for_combined_stages = []
     original_start_and_runtimes_for_combined_stages = []
@@ -222,7 +263,7 @@ class Analyzer:
     for id, stage in self.stages.iteritems():
       runtimes = [task.runtime() for task in stage.tasks]
       median_runtime = numpy.percentile(runtimes, 50)
-      threshold_runtime = numpy.percentile(runtimes, 95)
+      threshold_runtime = threshold_fn(runtimes)
       no_straggler_start_and_runtimes = []
       num_stragglers = 0
       for task in sorted(stage.tasks, key = lambda t: t.runtime()):
@@ -259,7 +300,7 @@ class Analyzer:
       total_no_stragglers_runtime += new_runtime
     return total_no_stragglers_runtime * 1.0 / self.get_simulated_runtime()
 
-  def replace_stragglers_with_median_speedup(self):
+  def replace_all_tasks_with_median_speedup(self):
     """ Returns how much faster the job would have run if there were no stragglers.
 
     Removes stragglers by replacing all task runtimes with the median runtime for tasks in the
@@ -709,19 +750,21 @@ def parse(filename, agg_results_filename=None):
   fraction_time_deserializing = analyzer.fraction_time_deserializing()
   print "\nFraction time just deserializing: %s" % fraction_time_deserializing
   
-  no_stragglers_average_runtime_speedup = analyzer.no_stragglers_using_average_runtime_speedup(
-    filename)
-  no_stragglers_replace_with_median_speedup = analyzer.replace_stragglers_with_median_speedup()
+  replace_all_tasks_with_average_speedup = analyzer.replace_all_tasks_with_average_speedup(filename)
+  no_stragglers_replace_with_median_speedup = analyzer.replace_all_tasks_with_median_speedup()
   no_stragglers_replace_95_with_median_speedup = \
-    analyzer.replace_95_stragglers_with_median_speedup()
+    analyzer.replace_stragglers_with_median_speedup(lambda runtimes: numpy.percentile(runtimes, 95))
+  no_stragglers_replace_ganesh_with_median_speedup = \
+    analyzer.replace_stragglers_with_median_speedup(
+      lambda runtimes: 1.5 * numpy.percentile(runtimes, 50))
   no_stragglers_perfect_parallelism = \
     analyzer.no_stragglers_perfect_parallelism_speedup()
   median_progress_rate_speedup = analyzer.median_progress_rate_speedup()
   print (("\nSpeedup from eliminating stragglers: %s (perfect parallelism) %s (use average) "
-    "%s (use median) %s (95%%ile=>med) %s (median progress rate)") %
-    (no_stragglers_perfect_parallelism, no_stragglers_average_runtime_speedup,
-     no_stragglers_replace_with_median_speedup, no_stragglers_replace_95_with_median_speedup,
-     median_progress_rate_speedup))
+    "%s (use median) %s (1.5=>median) %s (95%%ile=>med) %s (median progress rate)") %
+    (no_stragglers_perfect_parallelism, replace_all_tasks_with_average_speedup,
+     no_stragglers_replace_with_median_speedup, no_stragglers_replace_ganesh_with_median_speedup,
+     no_stragglers_replace_95_with_median_speedup, median_progress_rate_speedup))
 
   simulated_versus_actual = analyzer.simulated_runtime_over_actual(filename)
   print "\n Simulated versus actual runtime: ", simulated_versus_actual
@@ -734,12 +777,12 @@ def parse(filename, agg_results_filename=None):
       no_network_speedup, fraction_time_waiting_on_network, fraction_time_using_network,
       no_disk_speedup, fraction_time_waiting_on_disk, fraction_time_using_disk,
       no_compute_speedup, fraction_time_serializing, fraction_time_computing,
-      no_stragglers_average_runtime_speedup, no_stragglers_replace_with_median_speedup,
+      replace_all_tasks_with_average_speedup, no_stragglers_replace_with_median_speedup,
       no_stragglers_replace_95_with_median_speedup, no_stragglers_perfect_parallelism,
       no_input_disk_speedup, simulated_versus_actual, median_progress_rate_speedup,
       no_shuffle_disk_speedup))
     f.close()
-    analyzer.write_straggler_info(agg_results_filename)
+    analyzer.write_straggler_info(filename, agg_results_filename)
     analyzer.write_stage_info(filename, agg_results_filename)
 
 

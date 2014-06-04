@@ -14,6 +14,7 @@ class Task:
 
     self.start_time = int(items_dict["START_TIME"])
     self.finish_time = int(items_dict["FINISH_TIME"])
+    self.executor = items_dict["HOST"]
     self.executor_run_time = int(items_dict["EXECUTOR_RUN_TIME"])
     self.executor_deserialize_time = int(items_dict["EXECUTOR_DESERIALIZE_TIME"])
     self.scheduler_delay = (self.finish_time - self.executor_run_time -
@@ -26,6 +27,10 @@ class Task:
       self.deserialize_time_nanos = int(items_dict["DESERIALIZATION_TIME_NANOS"])
     if "SERIALIZATION_TIME_NANOS" in items_dict:
       self.serialize_time_nanos = int(items_dict["SERIALIZATION_TIME_NANOS"])
+
+    # Should be set to true if this task is a straggler and we know the cause of the
+    # straggler behavior.
+    self.straggler_behavior_explained = False
 
     self.shuffle_write_time = 0
     self.shuffle_mb_written = 0
@@ -64,7 +69,7 @@ class Task:
 
   def input_size_mb(self):
     if self.has_fetch:
-      return max(1, self.remote_mb_read + self.local_mb_read)
+      return self.remote_mb_read + self.local_mb_read
     else:
       return self.input_mb
 
