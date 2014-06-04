@@ -266,7 +266,8 @@ class Analyzer:
       threshold_runtime = threshold_fn(runtimes)
       no_straggler_start_and_runtimes = []
       num_stragglers = 0
-      for task in sorted(stage.tasks, key = lambda t: t.runtime()):
+      sorted_stage_tasks = sorted(stage.tasks, key = lambda t: t.runtime())
+      for task in sorted_stage_tasks:
         if task.runtime() >= threshold_runtime:
           assert(median_runtime <= task.runtime())
           no_straggler_start_and_runtimes.append((task.start_time, median_runtime))
@@ -282,7 +283,7 @@ class Analyzer:
         no_stragglers_runtime = simulate.simulate(
           [x[1] for x in no_straggler_start_and_runtimes])[0]
         total_no_stragglers_runtime += no_stragglers_runtime
-        original_runtime = simulate.simulate([task.runtime() for task in stage.tasks])[0]
+        original_runtime = simulate.simulate([task.runtime() for task in sorted_stage_tasks])[0]
         print ("%s: Original: %s, Orig (sim): %s, no stragg: %s (%s stragglers)" %
           (id, stage.finish_time() - stage.start_time, original_runtime, no_stragglers_runtime,
            num_stragglers))
