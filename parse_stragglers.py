@@ -6,7 +6,8 @@ from parse_logs import Analyzer
 def output_per_task_info(id, stage, filename):
   f = open("%s_%s" % (filename, id), "w")
   headers = ["Start time", "Runtime", "input size (MB)", "Progress rate", "Input read time",
-    "Fetch wait", "Compute time", "GC time", "Serialization time", "Shuffle write", "Executor"]
+    "Fetch wait", "Compute time", "Compute w/o GC", "GC time", "Serialization time",
+    "Shuffle write", "Executor", "Scheduler Delay"]
   f.write("\t".join(headers))
   f.write("\n")
   for task in stage.tasks:
@@ -25,6 +26,7 @@ def output_per_task_info(id, stage, filename):
       task.input_read_time,
       fetch_wait,
       task.compute_time(),
+      task.compute_time_without_gc(),
       task.gc_time,
       (task.serialize_time_nanos + task.deserialize_time_nanos) / 1e6,
       task.shuffle_write_time,

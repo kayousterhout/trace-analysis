@@ -144,11 +144,17 @@ class Analyzer:
 
     total_tasks = sum([len(s.tasks) for s in self.stages.values()])
     total_runtime = sum([s.total_runtime() for s in self.stages.values()])
-    total_stragglers = sum([s.total_stragglers() for s in self.stages.values()])
-    total_straggler_time = sum([s.total_straggler_runtime() for s in self.stages.values()])
+    total_traditional_stragglers = sum([s.traditional_stragglers() for s in self.stages.values()])
+    total_traditional_straggler_time = sum(
+      [s.total_traditional_straggler_runtime() for s in self.stages.values()])
+
+    traditional_stragglers_explained_by_progress_rate = sum(
+      [s.traditional_stragglers_explained_by_progress_rate()[0] for s in self.stages.values()])
+
     progress_rate_straggler_info = [s.progress_rate_stragglers() for s in self.stages.values()]
     progress_rate_straggler_count = sum([x[0] for x in progress_rate_straggler_info])
     progress_rate_straggler_time = sum([x[1] for x in progress_rate_straggler_info])
+
     hdfs_read_stragglers_info = [s.hdfs_read_stragglers() for s in self.stages.values()]
     hdfs_read_stragglers_count = sum([x[0] for x in hdfs_read_stragglers_info])
     hdfs_read_stragglers_time = sum([x[1] for x in hdfs_read_stragglers_info])
@@ -165,27 +171,33 @@ class Analyzer:
     scheduler_delay_straggler_count = sum([x[0] for x in scheduler_delay_straggler_info])
     scheduler_delay_straggler_time = sum([x[1] for x in scheduler_delay_straggler_info])
 
+    scheduler_and_read_stragger_info = [s.hdfs_read_and_scheduler_delay_stragglers()
+      for s in self.stages.values()]
+    scheduler_and_read_straggler_count = sum([x[0] for x in scheduler_and_read_stragger_info])
+    scheduler_and_read_straggler_time = sum([x[1] for x in scheduler_and_read_stragger_info])
+
     jit_straggler_count = sum([s.jit_stragglers() for s in self.stages.values()])
 
     all_stragglers = []
     for s in self.stages.values():
-      all_stragglers.extend(s.get_stragglers())
+      all_stragglers.extend(s.get_progress_rate_stragglers())
     explained_stragglers = [t for t in all_stragglers if t.straggler_behavior_explained]
+    explained_stragglers_total_time = sum([t.runtime() for t in explained_stragglers])
 
     f = open(filename, "a")
-    data_to_write = [job_name, total_tasks, total_runtime, total_stragglers, total_straggler_time,
-      len(explained_stragglers), len(all_stragglers),
-      progress_rate_straggler_count, progress_rate_straggler_time, hdfs_read_stragglers_count,
-      hdfs_read_stragglers_time,
+    data_to_write = [job_name, total_tasks, total_runtime,
+      len(explained_stragglers), explained_stragglers_total_time, len(all_stragglers),
+      total_traditional_stragglers, total_traditional_straggler_time,
+      traditional_stragglers_explained_by_progress_rate,
+      progress_rate_straggler_count, progress_rate_straggler_time,
+      hdfs_read_stragglers_count, hdfs_read_stragglers_time,
       gc_straggler_count, gc_straggler_time,
       network_straggler_count, network_straggler_time,
       scheduler_delay_straggler_count, scheduler_delay_straggler_time,
+      scheduler_and_read_straggler_count, scheduler_and_read_straggler_time,
       jit_straggler_count]
     self.write_data_to_file(data_to_write, f)
     f.close()
-    # Stragglers caused by garbage collection.
-    # Stragglers caused by data skew.
-    # Stragglers caused by JIT. 
 
   def median_progress_rate_speedup(self):
     """ Returns how fast the job would have run if all tasks had the median progress rate. """

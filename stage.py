@@ -17,10 +17,15 @@ class Stage:
     else:
       input_method = self.tasks[0].input_read_method
     return (("%s tasks (avg runtime: %s, max runtime: %s) Start: %s, runtime: %s, "
-      "Input MB: %s (from %s), Output MB: %s, Straggers: %s, HDFS straggers: %s") %
+      "Input MB: %s (from %s), Output MB: %s, Straggers: %s, Progress rate straggers: %s, "
+      "Progress rate stragglers explained by scheduler delay (%s), HDFS read (%s), "
+      "HDFS and read (%s), GC (%s), Network (%s), JIT (%s)") %
       (len(self.tasks), self.average_task_runtime(), max_task_runtime, self.start_time,
        self.finish_time() - self.start_time, self.input_mb(), input_method, self.output_mb(),
-       self.total_stragglers(), self.hdfs_read_stragglers()[0]))
+       self.traditional_stragglers(), self.progress_rate_stragglers()[0],
+       self.scheduler_delay_stragglers()[0], self.hdfs_read_stragglers()[0],
+       self.hdfs_read_and_scheduler_delay_stragglers()[0], self.gc_stragglers()[0],
+       self.network_stragglers()[0], self.jit_stragglers()))
 
   def verbose_str(self):
     # Get info about the longest task.
@@ -50,17 +55,20 @@ class Stage:
   def total_disk_read_time(self):
     return sum([t.remote_disk_read_time for t in self.tasks if t.has_fetch])
 
-  def total_stragglers(self):
-    """ Returns the total number of straggler tasks for this stage. """
+  def traditional_stragglers(self):
+    """ Returns the total number of straggler tasks for this stage using the traditional metric.
+    
+    This method considers a task a straggler if its runtime is at least 1.5 times the median
+    runtime for other tasks in the stage. """
     median_task_duration = numpy.median([t.runtime() for t in self.tasks])
     stragglers = [t for t in self.tasks if t.runtime() >= 1.5*median_task_duration]
     return len(stragglers)
 
-  def total_straggler_runtime(self):
+  def total_traditional_straggler_runtime(self):
     median_task_duration = numpy.median([t.runtime() for t in self.tasks])
     return sum([t.runtime() for t in self.tasks if t.runtime() >= 1.5*median_task_duration])
 
-  def progress_rate_stragglers(self):
+  def traditional_stragglers_explained_by_progress_rate(self):
     """ Returns the number of stragglers that can be explained by the amount of data they process.
     
     We describe a straggler as "explainable" by the amount of data it processes if it is not
@@ -81,22 +89,39 @@ class Stage:
           progress_rate_stragglers_total_time += task.runtime()
     return progress_rate_stragglers, progress_rate_stragglers_total_time
 
-  def hdfs_read_stragglers(self):
-    """ Returns the number of and total time taken by stragglers caused by slow HDFS reads. """
-    median_task_duration = numpy.median([t.runtime() for t in self.tasks])
-    stragglers = [t for t in self.tasks if t.runtime() >= 1.5*median_task_duration]
-    times_wo_input_read = [t.runtime() - t.input_read_time for t in self.tasks]
-    median_time_wo_input_read = numpy.median(times_wo_input_read)
-    read_stragglers = [t for t in stragglers if t.runtime() - t.input_read_time < 1.5 * median_time_wo_input_read]
-    read_stragglers_time = sum([t.runtime() for t in read_stragglers])
-    for t in read_stragglers:
-      t.straggler_behavior_explained = True
-    return len(read_stragglers), read_stragglers_time
+  def progress_rate_stragglers(self):
+    stragglers = self.get_progress_rate_stragglers()
+    return len(stragglers), sum([t.runtime() for t in stragglers])
 
-  def get_stragglers(self):
-    median_task_duration = numpy.median([t.runtime() for t in self.tasks])
-    stragglers = [t for t in self.tasks if t.runtime() >= 1.5*median_task_duration]
-    return stragglers
+  def get_tasks_with_non_zero_input(self):
+    return [t for t in self.tasks if t.input_size_mb() > 0]
+
+  def get_progress_rate_stragglers(self):
+    progress_rates = [t.runtime() * 1.0 / t.input_size_mb()
+      for t in self.get_tasks_with_non_zero_input()]
+    median_progress_rate = numpy.median(progress_rates)
+    progress_rate_stragglers = [t for t in self.get_tasks_with_non_zero_input()
+      if t.runtime() * 1.0 / t.input_size_mb() >= 1.5*median_progress_rate]
+    return progress_rate_stragglers
+
+  def get_attributable_stragglers(self, progress_rate_fn):
+    """ Returns the number of progress rate stragglers that are no longer stragglers
+    when the provided function is used to compute the progress rate."""
+    new_progress_rates = [progress_rate_fn(t) for t in self.get_tasks_with_non_zero_input()]
+    median_new_progress_rate = numpy.median(new_progress_rates)
+    attributable_stragglers = [t for t in self.get_progress_rate_stragglers()
+      if progress_rate_fn(t) < 1.5 * median_new_progress_rate]
+    for t in attributable_stragglers:
+      t.straggler_behavior_explained = True
+    return len(attributable_stragglers), sum([t.runtime() for t in attributable_stragglers])
+
+  def hdfs_read_stragglers(self):
+    """ Returns the number of and total time taken by stragglers caused by slow HDFS reads.
+    
+    Considers a task a straggler if its processing rate is more than 1.5x the median. """
+    def progress_rate_wo_hdfs_read(task):
+      return (task.runtime() - task.input_read_time) * 1.0 / task.input_size_mb()
+    return self.get_attributable_stragglers(progress_rate_wo_hdfs_read)
 
   def network_stragglers(self):
     """ Returns the number of and total time taken by stragglers caused by poor network performance.
@@ -104,38 +129,29 @@ class Stage:
     Does not account for tasks that have poor network performance because they read input data from
     a remote data node; only accounts for tasks with slow networks during the shuffle phase.
     """
-    times_wo_network = [t.runtime() - t.fetch_wait for t in self.tasks if t.has_fetch]
-    if len(times_wo_network) == 0:
-      # This stage is not a reduce stage, so there's no shuffle and therefore no network stragglers.
+    def progress_rate_wo_network(task):
+      return (task.runtime() - task.fetch_wait) * 1.0 / task.input_size_mb()
+    if not self.tasks[0].has_fetch:
+      # If the first task doesn't have a fetch none of them should, so there can't be any
+      # network stragglers.
       return 0, 0
-    median_time_wo_network = numpy.median(times_wo_network)
-    network_stragglers = [t for t in self.get_stragglers()
-      if t.has_fetch and (t.runtime() - t.fetch_wait) < 1.5 * median_time_wo_network]
-    for t in network_stragglers:
-      t.straggler_behavior_explained = True
-    network_stragglers_time = sum([t.runtime() for t in network_stragglers])
-    return len(network_stragglers), network_stragglers_time
+    return self.get_attributable_stragglers(progress_rate_wo_network)
 
   def scheduler_delay_stragglers(self):
-    times_wo_scheduler_delay = [t.runtime() - t.scheduler_delay for t in self.tasks]
-    median_time_wo_scheduler_delay = numpy.median(times_wo_scheduler_delay)
-    print len(self.tasks), "Median time wo scheduler dleay: ", median_time_wo_scheduler_delay
-    scheduler_delay_stragglers = [t for t in self.get_stragglers()
-      if (t.runtime() - t.scheduler_delay) < 1.5 * median_time_wo_scheduler_delay]
-    for t in scheduler_delay_stragglers:
-      t.straggler_behavior_explained = True
-    scheduler_delay_stragglers_time = sum([t.runtime() for t in scheduler_delay_stragglers])
-    return len(scheduler_delay_stragglers), scheduler_delay_stragglers_time
+    def progress_rate_wo_scheduler_delay(task):
+      return (task.runtime() - task.scheduler_delay) * 1.0 / task.input_size_mb()
+    return self.get_attributable_stragglers(progress_rate_wo_scheduler_delay)
+
+  def hdfs_read_and_scheduler_delay_stragglers(self):
+    def progress_rate_wo_read_and_sched(task):
+      return ((task.runtime() - task.scheduler_delay - task.input_read_time) * 1.0 /
+        task.input_size_mb())
+    return self.get_attributable_stragglers(progress_rate_wo_read_and_sched)
 
   def gc_stragglers(self):
-    times_wo_gc = [t.runtime() - t.gc_time for t in self.tasks]
-    median_time_wo_gc = numpy.median(times_wo_gc)
-    gc_stragglers = [t for t in self.get_stragglers()
-      if (t.runtime() - t.gc_time) < 1.5 * median_time_wo_gc]
-    for t in gc_stragglers:
-      t.straggler_behavior_explained = True
-    gc_stragglers_time = sum([t.runtime() for t in gc_stragglers])
-    return len(gc_stragglers), gc_stragglers_time
+    def progress_rate_wo_gc(task):
+      return (task.runtime() - task.gc_time) * 1.0 / task.input_size_mb()
+    return self.get_attributable_stragglers(progress_rate_wo_gc)
 
   def jit_stragglers(self):
     executor_to_task_finish_times = collections.defaultdict(list)
@@ -145,17 +161,22 @@ class Stage:
     # Tasks where no other task in the same stage completed on the executor
     # before this task started.
     virgin_tasks = [] 
-    for task in self.tasks:
+    for task in self.get_tasks_with_non_zero_input():
       first_task_finish_on_executor = min(executor_to_task_finish_times[task.executor])
       if task.start_time < first_task_finish_on_executor:
         virgin_tasks.append(task)
 
-    median_task_duration = numpy.median([t.runtime() for t in self.tasks])
-    median_virgin_task_duration = numpy.median([t.runtime() for t in virgin_tasks])
+    def progress_rate(task):
+      return task.runtime() * 1.0 / task.input_size_mb()
+
+    median_task_progress_rate = numpy.median([progress_rate(t)
+      for t in self.get_tasks_with_non_zero_input()])
+    median_virgin_task_progress_rate = numpy.median([progress_rate(t) for t in virgin_tasks])
     jit_stragglers = 0
     for task in virgin_tasks:
-      if task.runtime() >= 1.5*median_task_duration:
-        if task.runtime() < 1.5*median_virgin_task_duration:
+      task_progress_rate = progress_rate(task)
+      if task_progress_rate >= 1.5*median_task_progress_rate:
+        if task_progress_rate < 1.5*median_virgin_task_progress_rate:
           jit_stragglers += 1
           task.straggler_behavior_explained = True
     return jit_stragglers
@@ -167,7 +188,6 @@ class Stage:
     for the stage. """
     # Ignore tasks with 0 input bytes when computing progress rates. These seem to occur for the
     # big shuffle to partition the data (even though the blocks read are non-zero for those tasks).
-    # TODO: Figure out what's going on with the zero-input-mb tasks.
     progress_rates = [t.runtime() * 1.0 / t.input_size_mb() for t in self.tasks
       if t.input_size_mb() > 0]
     median_progress_rate = numpy.median(progress_rates)
