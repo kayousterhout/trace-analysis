@@ -138,6 +138,25 @@ class Analyzer:
     stringified_data += "\n"
     file_handle.write("\t".join(stringified_data))
 
+  def write_hdfs_stage_normalized_runtimes(self, agg_filename_prefix):
+    """ Writes the normalized runtimes for all stages that read from hdfs. """
+    all_hdfs_runtimes_file = open("%s_normalized_runtimes_hdfs" % agg_filename_prefix, "a")
+    non_local_runtimes_file = open("%s_normalized_runtimes_hdfs_non_local" % agg_filename_prefix, "a")
+    for stage in self.stages.values():
+      if stage.tasks[0].input_mb > 0:
+        median_runtime = numpy.median([x.runtime() for x in stage.tasks])
+        normalized_runtimes = [str(x.runtime() * 1.0 / median_runtime) for x in stage.tasks]
+        all_hdfs_runtimes_file.write("\n".join(normalized_runtimes))
+        all_hdfs_runtimes_file.write("\n")
+
+        normalized_non_local_runtimes = [str(x.runtime() * 1.0 / median_runtime)
+          for x in stage.tasks if not x.data_local]
+        if len(normalized_non_local_runtimes) > 0:
+          non_local_runtimes_file.write("\n".join(normalized_non_local_runtimes))
+          non_local_runtimes_file.write("\n")
+    all_hdfs_runtimes_file.close()
+    non_local_runtimes_file.close()
+
   def write_straggler_info(self, job_name, prefix):
     """ Writes information about straggler causes to a file.""" 
     filename = "%s_stragglers" % prefix
@@ -797,6 +816,8 @@ def parse(filename, agg_results_filename=None):
     f.close()
     analyzer.write_straggler_info(filename, agg_results_filename)
     analyzer.write_stage_info(filename, agg_results_filename)
+
+    analyzer.write_hdfs_stage_normalized_runtimes(agg_results_filename)
 
 
 def main(argv):

@@ -31,7 +31,8 @@ def output_per_task_info(id, stage, filename):
       (task.serialize_time_nanos + task.deserialize_time_nanos) / 1e6,
       task.shuffle_write_time,
       task.executor,
-      task.scheduler_delay]
+      task.scheduler_delay,
+      task.data_local]
 
     f.write("\t".join([str(item) for item in items]))
     f.write("\n")

@@ -51,7 +51,11 @@ class Task:
       self.input_mb = float(items_dict["INPUT_BYTES"]) / 1048576.
 
     self.has_fetch = True
+    # False if the task was a map task that did not run locally with its input data.
+    self.data_local = True
     if line.find("FETCH") < 0:
+      if items_dict["LOCALITY"] != "NODE_LOCAL":
+        self.data_local = False
       self.has_fetch = False
       return
       
