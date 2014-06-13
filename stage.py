@@ -105,7 +105,7 @@ class Stage:
     return progress_rate_stragglers
 
   def get_attributable_stragglers(self, progress_rate_fn):
-    """ Returns the number of progress rate stragglers that are no longer stragglers
+    """ Returns the progress rate stragglers that are no longer stragglers
     when the provided function is used to compute the progress rate."""
     new_progress_rates = [progress_rate_fn(t) for t in self.get_tasks_with_non_zero_input()]
     median_new_progress_rate = numpy.median(new_progress_rates)
@@ -113,15 +113,24 @@ class Stage:
       if progress_rate_fn(t) < 1.5 * median_new_progress_rate]
     for t in attributable_stragglers:
       t.straggler_behavior_explained = True
+    return attributable_stragglers
+
+  def get_attributable_stragglers_stats(self, progress_rate_fn):
+    """ Returns the number of and total time taken by attributable stragglers. """
+    attributable_stragglers = self.get_attributable_stragglers(progress_rate_fn)
     return len(attributable_stragglers), sum([t.runtime() for t in attributable_stragglers])
 
   def hdfs_read_stragglers(self):
-    """ Returns the number of and total time taken by stragglers caused by slow HDFS reads.
+    """ Returns the number of and total time taken by stragglers caused by slow HDFS reads,
+    as well as the number of those stragglers that had non-local reads.
     
     Considers a task a straggler if its processing rate is more than 1.5x the median. """
     def progress_rate_wo_hdfs_read(task):
       return (task.runtime() - task.input_read_time) * 1.0 / task.input_size_mb()
-    return self.get_attributable_stragglers(progress_rate_wo_hdfs_read)
+    attributable_stragglers = self.get_attributable_stragglers(progress_rate_wo_hdfs_read)
+    non_local = len([t for t in attributable_stragglers if not t.data_local])
+    straggler_time = sum([t.runtime() for t in attributable_stragglers])
+    return len(attributable_stragglers), straggler_time, non_local
 
   def network_stragglers(self):
     """ Returns the number of and total time taken by stragglers caused by poor network performance.
@@ -135,23 +144,23 @@ class Stage:
       # If the first task doesn't have a fetch none of them should, so there can't be any
       # network stragglers.
       return 0, 0
-    return self.get_attributable_stragglers(progress_rate_wo_network)
+    return self.get_attributable_stragglers_stats(progress_rate_wo_network)
 
   def scheduler_delay_stragglers(self):
     def progress_rate_wo_scheduler_delay(task):
       return (task.runtime() - task.scheduler_delay) * 1.0 / task.input_size_mb()
-    return self.get_attributable_stragglers(progress_rate_wo_scheduler_delay)
+    return self.get_attributable_stragglers_stats(progress_rate_wo_scheduler_delay)
 
   def hdfs_read_and_scheduler_delay_stragglers(self):
     def progress_rate_wo_read_and_sched(task):
       return ((task.runtime() - task.scheduler_delay - task.input_read_time) * 1.0 /
         task.input_size_mb())
-    return self.get_attributable_stragglers(progress_rate_wo_read_and_sched)
+    return self.get_attributable_stragglers_stats(progress_rate_wo_read_and_sched)
 
   def gc_stragglers(self):
     def progress_rate_wo_gc(task):
       return (task.runtime() - task.gc_time) * 1.0 / task.input_size_mb()
-    return self.get_attributable_stragglers(progress_rate_wo_gc)
+    return self.get_attributable_stragglers_stats(progress_rate_wo_gc)
 
   def jit_stragglers(self):
     executor_to_task_finish_times = collections.defaultdict(list)

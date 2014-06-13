@@ -177,6 +177,7 @@ class Analyzer:
     hdfs_read_stragglers_info = [s.hdfs_read_stragglers() for s in self.stages.values()]
     hdfs_read_stragglers_count = sum([x[0] for x in hdfs_read_stragglers_info])
     hdfs_read_stragglers_time = sum([x[1] for x in hdfs_read_stragglers_info])
+    hdfs_read_stragglers_non_local = sum([x[2] for x in hdfs_read_stragglers_info])
 
     gc_straggler_info = [s.gc_stragglers() for s in self.stages.values()]
     gc_straggler_count = sum([x[0] for x in gc_straggler_info])
@@ -209,7 +210,7 @@ class Analyzer:
       total_traditional_stragglers, total_traditional_straggler_time,
       traditional_stragglers_explained_by_progress_rate,
       progress_rate_straggler_count, progress_rate_straggler_time,
-      hdfs_read_stragglers_count, hdfs_read_stragglers_time,
+      hdfs_read_stragglers_count, hdfs_read_stragglers_time, hdfs_read_stragglers_non_local,
       gc_straggler_count, gc_straggler_time,
       network_straggler_count, network_straggler_time,
       scheduler_delay_straggler_count, scheduler_delay_straggler_time,
