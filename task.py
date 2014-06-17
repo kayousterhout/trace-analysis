@@ -54,7 +54,7 @@ class Task:
     # False if the task was a map task that did not run locally with its input data.
     self.data_local = True
     if line.find("FETCH") < 0:
-      if items_dict["LOCALITY"] != "NODE_LOCAL":
+      if "LOCALITY" in items_dict and items_dict["LOCALITY"] != "NODE_LOCAL":
         self.data_local = False
       self.has_fetch = False
       return
