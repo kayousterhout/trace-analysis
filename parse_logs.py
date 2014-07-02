@@ -442,33 +442,29 @@ class Analyzer:
       total_runtime += sum([t.runtime() for t in stage.tasks])
     return total_network_time * 1.0 / total_runtime
 
-  def no_disk_shuffle_speedup(self):
-    """ Returns the speedup if all disk I/O time for the shuffle had been completely eliminated. """
-    return self.calculate_speedup(
-      "Computing speedup without disk",
-      lambda t: t.runtime(),
-      lambda t: t.runtime_no_disk_for_shuffle())
-
   def no_input_disk_speedup(self):
     return self.calculate_speedup(
       "Computing speedup without disk input",
       lambda t: t.runtime(),
       lambda t: t.runtime_no_input())
 
-  def no_shuffle_disk_speedup(self):
+  def no_shuffle_write_disk_speedup(self):
     return self.calculate_speedup(
       "Computing speedup without disk for shuffle",
       lambda t: t.runtime(),
       lambda t: t.runtime_no_shuffle_write())
 
-  def fraction_time_waiting_on_disk(self):
-    total_disk_wait_time = 0
-    total_runtime = 0
-    for stage in self.stages.values():
-      for task in stage.tasks:
-        total_disk_wait_time += (task.runtime() - task.runtime_no_disk_for_shuffle())
-        total_runtime += task.runtime()
-    return total_disk_wait_time * 1.0 / total_runtime
+  def no_shuffle_read_disk_speedup(self):
+    return self.calculate_speedup(
+      "Computing speedup without shuffle read",
+      lambda t: t.runtime(),
+      lambda t: t.runtime_no_shuffle_read())
+
+  def no_disk_speedup(self):
+    return self.calculate_speedup(
+      "Computing speedup without disk",
+      lambda t: t.runtime(),
+      lambda t: t.runtime_no_disk())
 
   def fraction_fetch_time_reading_from_disk(self):
     total_time_fetching = sum([s.total_time_fetching() for s in self.stages.values()])
@@ -641,16 +637,15 @@ class Analyzer:
       # split.
       scheduler_delay_end = start + task.scheduler_delay
       deserialize_end = scheduler_delay_end + task.executor_deserialize_time
-      hdfs_read_end = deserialize_end
-      local_read_end = deserialize_end
-      fetch_wait_end = deserialize_end
+      # TODO: input_read_time should only be included when the task reads input data from
+      # HDFS, but with the current logging it's also recorded when data is read from memory,
+      # so should be included here to make the task end time line up properly.
+      hdfs_read_end = deserialize_end + task.input_read_time
+      local_read_end = hdfs_read_end
+      fetch_wait_end = hdfs_read_end
       if task.has_fetch:
         local_read_end = deserialize_end + task.local_read_time
         fetch_wait_end = local_read_end + task.fetch_wait
-      elif task.input_read_method == "HDFS":
-        hdfs_read_end = deserialize_end + task.input_read_time
-        local_read_end = hdfs_read_end
-        fetch_wait_end = hdfs_read_end
       # Here, assume GC happens as part of compute (although we know that sometimes
       # GC happens during fetch wait.
       serialize_millis = (task.deserialize_time_nanos + task.serialize_time_nanos) / 1e6
@@ -759,13 +754,13 @@ def parse(filename, agg_results_filename=None):
   print "\nFraction time using network: %s" % fraction_time_using_network
   print ("\nFraction of fetch time spent reading from disk: %s" %
     analyzer.fraction_fetch_time_reading_from_disk())
-  no_disk_speedup = analyzer.no_disk_shuffle_speedup()
-  print "Speedup from eliminating disk for shuffle: %s" % no_disk_speedup
   no_input_disk_speedup = analyzer.no_input_disk_speedup()
-  no_shuffle_disk_speedup = analyzer.no_shuffle_disk_speedup()
+  no_shuffle_write_disk_speedup = analyzer.no_shuffle_write_disk_speedup()
   print "Speedup from eliminating disk for input: %s" % no_input_disk_speedup
-  fraction_time_waiting_on_disk = analyzer.fraction_time_waiting_on_disk()
-  print "Fraction time waiting on disk: %s" % fraction_time_waiting_on_disk
+  no_shuffle_read_disk_speedup = analyzer.no_shuffle_read_disk_speedup()
+  print "Speedup from eliminating shuffle read: %s" % no_shuffle_read_disk_speedup
+  no_disk_speedup = analyzer.no_disk_speedup()
+  print "No disk speedup: %s" % no_disk_speedup
   fraction_time_using_disk = analyzer.fraction_time_using_disk()
   print("\nFraction of time spent writing/reading shuffle data to/from disk: %s" %
     fraction_time_using_disk)
@@ -808,12 +803,12 @@ def parse(filename, agg_results_filename=None):
     f.write("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (
       filename.split("/")[1].split("_")[0],
       no_network_speedup, fraction_time_waiting_on_network, fraction_time_using_network,
-      no_disk_speedup, fraction_time_waiting_on_disk, fraction_time_using_disk,
+      no_disk_speedup, fraction_time_using_disk,
       no_compute_speedup, fraction_time_serializing, fraction_time_computing,
       replace_all_tasks_with_average_speedup, no_stragglers_replace_with_median_speedup,
       no_stragglers_replace_95_with_median_speedup, no_stragglers_perfect_parallelism,
       no_input_disk_speedup, simulated_versus_actual, median_progress_rate_speedup,
-      no_shuffle_disk_speedup))
+      no_shuffle_write_disk_speedup, no_shuffle_read_disk_speedup))
     f.close()
     analyzer.write_straggler_info(filename, agg_results_filename)
     analyzer.write_stage_info(filename, agg_results_filename)

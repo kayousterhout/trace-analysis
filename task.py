@@ -65,6 +65,8 @@ class Task:
     self.remote_blocks_read = int(items_dict["BLOCK_FETCHED_REMOTE"])
     self.remote_mb_read = int(items_dict["REMOTE_BYTES_READ"]) / 1048576.
     self.local_mb_read = int(items_dict["LOCAL_READ_BYTES"]) / 1048576.
+    # The local read time is not included in the fetch wait time: the task blocks
+    # on reading data locally in the BlockFetcherIterator.initialize() method.
     self.local_read_time = int(items_dict["LOCAL_READ_TIME"])
     # TODO: This is not currently accurate due to page mapping.
     self.remote_disk_read_time = 0
@@ -127,6 +129,17 @@ class Task:
       compute_wait_time = compute_wait_time - self.fetch_wait
     return self.runtime() - compute_wait_time
 
+  def runtime_no_disk(self):
+    """ Returns a lower bound on what the runtime would have been without disk IO.
+
+    Includes shuffle read time, which is partially spent using the network and partially spent
+    using disk.
+    """
+    disk_time = self.shuffle_write_time + self.input_read_time
+    if self.has_fetch:
+      disk_time += self.local_read_time + self.fetch_wait
+    return self.runtime() - disk_time
+
   def disk_time(self):
     """ Returns the time writing shuffle output.
 
@@ -143,14 +156,14 @@ class Task:
       # Print times relative to the start time so that they're easier to read.
       desc = (("Start time: %s, local read time: %s, shuffle finish: %s, " +
             "fetch wait: %s, compute time: %s, gc time: %s, shuffle write time: %s, finish: %s, " +
-            "fraction disk time: %s shuffle bytes: %s, input bytes: %s") %
+            "shuffle bytes: %s, input bytes: %s") %
              (self.start_time, self.local_read_time,
               self.shuffle_finish_time - base, self.fetch_wait, self.compute_time(), self.gc_time,
               self.shuffle_write_time, self.finish_time - base,
-              self.fraction_time_disk(), self.local_mb_read + self.remote_mb_read, self.input_mb)) 
+              self.local_mb_read + self.remote_mb_read, self.input_mb)) 
     else:
-      desc = ("Start time: %s, finish: %s, gc time: %s, shuffle write time: %s" %
-        (self.start_time, self.finish_time, self.gc_time, self.shuffle_write_time))
+      desc = ("Start time: %s, finish: %s, scheduler delay: %s, input read time: %s, gc time: %s, shuffle write time: %s" %
+        (self.start_time, self.finish_time, self.scheduler_delay, self.input_read_time, self.gc_time, self.shuffle_write_time))
     return desc
 
   def log_verbose(self):
@@ -159,42 +172,18 @@ class Task:
   def runtime(self):
     return self.finish_time - self.start_time
 
-  def fraction_time_disk(self):
-    """ Should only be called for tasks with a fetch phase. """
-    if self.remote_disk_read_time == 0:
-      return 0
-    return self.remote_disk_read_time * 1.0 / self.total_time_fetching
-
-  def finish_time_no_disk_for_shuffle(self):
-    """ Returns the task finish time if the shuffle data hadn't been written to or read from disk.
-
-    This method relies on the finish_time_faster_fetch method and is thus also approximate. """
-    if not self.has_fetch:
-      return self.finish_time - self.shuffle_write_time
-
-    # Consider the fraction time spent reading from disk to be the network speedup,
-    # and compute the resulting finish time.
-    fraction_time_disk = self.fraction_time_disk()
-    self.logger.debug("Fraction time task used for disk: %s" % fraction_time_disk)
-    finish_faster_fetch = self.finish_time_faster_fetch(1 - fraction_time_disk)
-
-    # Also subtract the entire local fetch time, which we'll assume was all spent reading
-    # data from disk.
-    return finish_faster_fetch - self.local_read_time - self.shuffle_write_time
-
-  def runtime_no_disk_for_shuffle(self):
-    new_runtime = self.finish_time_no_disk_for_shuffle() - self.start_time
-    self.logger.debug(new_runtime)
-    speedup = new_runtime * 1.0 / self.runtime()
-    self.logger.debug("Speedup from eliminating disk: %s" % speedup)
-    return new_runtime
-
   def runtime_no_input(self):
     new_finish_time = self.finish_time - self.input_read_time
     return new_finish_time - self.start_time
 
   def runtime_no_shuffle_write(self):
     return self.finish_time - self.shuffle_write_time - self.start_time
+
+  def runtime_no_shuffle_read(self):
+    if self.has_fetch:
+      return self.finish_time - self.fetch_wait - self.local_read_time - self.start_time
+    else:
+      return self.runtime()
 
   def runtime_no_output(self):
     new_finish_time = self.finish_time - self.output_write_time
