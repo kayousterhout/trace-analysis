@@ -28,6 +28,20 @@ class Task:
     if "SERIALIZATION_TIME_NANOS" in items_dict:
       self.serialize_time_nanos = int(items_dict["SERIALIZATION_TIME_NANOS"])
 
+    # Utilization metrics.
+    # Map of device name to (utilization, read throughput, write throughout).
+    self.disk_utilization = {}
+    utilization_str = items_dict["DISK_UTILIZATION"]
+    for block_utilization_str in utilization_str.split(";"):
+      if block_utilization_str:
+        device_name, numbers = block_utilization_str.split(":")
+        self.disk_utilization[device_name] = [float(x) for x in numbers.split(",")]
+
+    cpu_utilization_numbers = [
+      float(x.split(":")[1]) for x in items_dict["CPU_UTILIZATION"].split(",")]
+    # Record the total CPU utilization as the total system CPU use + total user CPU use.
+    self.total_cpu_utilization = cpu_utilization_numbers[2] + cpu_utilization_numbers[3]
+
     # Should be set to true if this task is a straggler and we know the cause of the
     # straggler behavior.
     self.straggler_behavior_explained = False
@@ -45,10 +59,11 @@ class Task:
     self.input_read_method = "unknown"
     self.input_mb = 0
     if INPUT_METHOD_KEY in items_dict:
-      self.input_read_time = ((int(items_dict["READ_SETUP_TIME"]) +
-        int(items_dict["READ_BLOCKED_TIME"])) / 1.0e6)
+      self.input_read_time = int(items_dict["READ_TIME_NANOS"]) / 1.0e6
       self.input_read_method = items_dict["READ_METHOD"]
       self.input_mb = float(items_dict["INPUT_BYTES"]) / 1048576.
+
+    self.output_write_time = int(items_dict["OUTPUT_WRITE_BLOCKED_NANOS"]) / 1.0e6
 
     self.has_fetch = True
     # False if the task was a map task that did not run locally with its input data.
@@ -135,7 +150,7 @@ class Task:
     Includes shuffle read time, which is partially spent using the network and partially spent
     using disk.
     """
-    disk_time = self.shuffle_write_time + self.input_read_time
+    disk_time = self.output_write_time + self.shuffle_write_time + self.input_read_time
     if self.has_fetch:
       disk_time += self.local_read_time + self.fetch_wait
     return self.runtime() - disk_time
