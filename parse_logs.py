@@ -502,12 +502,13 @@ class Analyzer:
     total_runtime = 0
     for stage in self.stages.values():
       for task in stage.tasks:
-        serialize_time = task.serialize_time_nanos + task.deserialize_time_nanos
-        assert(serialize_time <= 1e6 * task.compute_time())
+        serialize_time = task.estimated_serialization_millis + task.estimated_deserialization_millis
+        if (serialize_time > task.compute_time()):
+          print ("!!!! Warning: For task %s, serialize time (%s) is larger than compute time (%s)" %
+            (task, serialize_time, task.compute_time()))
         total_serialize_time += serialize_time
         total_runtime += task.runtime()
-    serialize_time_millis = total_serialize_time / 1e6
-    return serialize_time_millis * 1.0 / total_runtime
+    return total_serialize_time * 1.0 / total_runtime
 
   def fraction_time_deserializing(self):
     """ Returns the fraction of time spent deserializing data. """
@@ -515,11 +516,10 @@ class Analyzer:
     total_runtime = 0
     for stage in self.stages.values():
       for task in stage.tasks:
-        serialize_time = task.deserialize_time_nanos
+        serialize_time = task.estimated_deserialization_millis
         total_deserialize_time += serialize_time
         total_runtime += task.runtime()
-    deserialize_time_millis = total_deserialize_time / 1e6
-    return deserialize_time_millis * 1.0 / total_runtime
+    return total_deserialize_time * 1.0 / total_runtime
 
   def fraction_time_gc(self):
     total_gc_time = 0
@@ -648,7 +648,7 @@ class Analyzer:
         fetch_wait_end = local_read_end + task.fetch_wait
       # Here, assume GC happens as part of compute (although we know that sometimes
       # GC happens during fetch wait.
-      serialize_millis = (task.deserialize_time_nanos + task.serialize_time_nanos) / 1e6
+      serialize_millis = task.estimated_serialization_millis + task.estimated_deserialization_millis
       serialize_end = fetch_wait_end + serialize_millis
       compute_end = (serialize_end + task.compute_time_without_gc() - serialize_millis -
         task.executor_deserialize_time)

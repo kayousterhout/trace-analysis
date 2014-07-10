@@ -1,3 +1,5 @@
+import numpy
+
 import logging
 
 class Task:
@@ -21,12 +23,25 @@ class Task:
       self.executor_deserialize_time - self.start_time)
     self.gc_time = int(items_dict["GC_TIME"])
     self.executor_id = int(items_dict["EXECUTOR_ID"])
-    self.deserialize_time_nanos = 0
-    self.serialize_time_nanos = 0
-    if "DESERIALIZATION_TIME_NANOS" in items_dict:
-      self.deserialize_time_nanos = int(items_dict["DESERIALIZATION_TIME_NANOS"])
-    if "SERIALIZATION_TIME_NANOS" in items_dict:
-      self.serialize_time_nanos = int(items_dict["SERIALIZATION_TIME_NANOS"])
+
+    # Estimate serialization and deserialization time based on samples.
+    # TODO: Report an estimated error here based on variation in samples?
+    self.estimated_serialization_millis = 0
+    if "SERIALIZATED_ITEMS" in items_dict:
+      serialized_items = int(items_dict["SERIALIZATED_ITEMS"])
+      # Samples are times in nanoseconds.
+      serialized_samples = [int(sample) for sample in items_dict["SERIALIZED_SAMPLES"].split(",")]
+      print "Serialized %s items, sampled %s" % (serialized_items, len(serialized_samples))
+      self.estimated_serialization_millis = serialized_items * numpy.mean(serialized_samples[0::10]) / 1e6
+
+    self.estimated_deserialization_millis = 0
+    if "DESERIALIZED_ITEMS" in items_dict:
+      deserialized_items = int(items_dict["DESERIALIZED_ITEMS"])
+      deserialized_samples = [
+        int(sample) for sample in items_dict["DESERIALIZATION_TIME_NANOS"].split(",")]
+      print "Deserialized %s items, sampled %s" % (deserialized_items, len(deserialized_samples))
+      self.estimated_deserialization_millis = (
+        deserialized_items * numpy.median(deserialized_samples[0::1]) / 1e6)
 
     # Utilization metrics.
     # Map of device name to (utilization, read throughput, write throughout).

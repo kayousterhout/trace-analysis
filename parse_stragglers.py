@@ -28,7 +28,7 @@ def output_per_task_info(id, stage, filename):
       task.compute_time(),
       task.compute_time_without_gc(),
       task.gc_time,
-      (task.serialize_time_nanos + task.deserialize_time_nanos) / 1e6,
+      task.estimated_serialization_millis + task.estimated_deserialization_millis,
       task.shuffle_write_time,
       task.executor,
       task.scheduler_delay,
