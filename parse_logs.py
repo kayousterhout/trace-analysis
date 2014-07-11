@@ -448,6 +448,12 @@ class Analyzer:
       lambda t: t.runtime(),
       lambda t: t.runtime_no_input())
 
+  def no_output_disk_speedup(self):
+    return self.calculate_speedup(
+      "Computing speedup without disk output",
+      lambda t: t.runtime(),
+      lambda t: t.runtime_no_output())
+
   def no_shuffle_write_disk_speedup(self):
     return self.calculate_speedup(
       "Computing speedup without disk for shuffle",
@@ -755,8 +761,11 @@ def parse(filename, agg_results_filename=None):
   print ("\nFraction of fetch time spent reading from disk: %s" %
     analyzer.fraction_fetch_time_reading_from_disk())
   no_input_disk_speedup = analyzer.no_input_disk_speedup()
-  no_shuffle_write_disk_speedup = analyzer.no_shuffle_write_disk_speedup()
   print "Speedup from eliminating disk for input: %s" % no_input_disk_speedup
+  no_output_disk_speedup = analyzer.no_output_disk_speedup()
+  print "Speedup from elimnating disk for output: %s" % no_output_disk_speedup
+  no_shuffle_write_disk_speedup = analyzer.no_shuffle_write_disk_speedup()
+  print "Speedup from eliminating disk for shuffle write: %s" % no_shuffle_write_disk_speedup
   no_shuffle_read_disk_speedup = analyzer.no_shuffle_read_disk_speedup()
   print "Speedup from eliminating shuffle read: %s" % no_shuffle_read_disk_speedup
   no_disk_speedup = analyzer.no_disk_speedup()
@@ -800,15 +809,17 @@ def parse(filename, agg_results_filename=None):
   if agg_results_filename != None:
     print "Adding results to %s" % agg_results_filename
     f = open(agg_results_filename, "a")
-    f.write("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (
+    data = [
       filename.split("/")[1].split("_")[0],
       no_network_speedup, fraction_time_waiting_on_network, fraction_time_using_network,
       no_disk_speedup, fraction_time_using_disk,
       no_compute_speedup, fraction_time_serializing, fraction_time_computing,
       replace_all_tasks_with_average_speedup, no_stragglers_replace_with_median_speedup,
       no_stragglers_replace_95_with_median_speedup, no_stragglers_perfect_parallelism,
-      no_input_disk_speedup, simulated_versus_actual, median_progress_rate_speedup,
-      no_shuffle_write_disk_speedup, no_shuffle_read_disk_speedup))
+      simulated_versus_actual, median_progress_rate_speedup,
+      no_input_disk_speedup, no_output_disk_speedup,
+      no_shuffle_write_disk_speedup, no_shuffle_read_disk_speedup]
+    analyzer.write_data_to_file(data, f)
     f.close()
     analyzer.write_straggler_info(filename, agg_results_filename)
     analyzer.write_stage_info(filename, agg_results_filename)

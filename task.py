@@ -206,6 +206,10 @@ class Task:
     new_finish_time = self.finish_time - self.input_read_time
     return new_finish_time - self.start_time
 
+  def runtime_no_output(self):
+    new_finish_time = self.finish_time - self.output_write_time
+    return new_finish_time - self.start_time
+
   def runtime_no_shuffle_write(self):
     return self.finish_time - self.shuffle_write_time - self.start_time
 
