@@ -124,7 +124,8 @@ class Task:
      Assumes shuffle writes don't get pipelined with task execution (TODO: verify this).
      Does not include GC time.
      """
-     compute_time = (self.runtime() - self.scheduler_delay - self.gc_time - self.shuffle_write_time - self.input_read_time)
+     compute_time = (self.runtime() - self.scheduler_delay - self.gc_time -
+       self.shuffle_write_time - self.input_read_time - self.output_write_time)
      if self.has_fetch:
        # Subtract off of the time to read local data (which typically comes from disk) because
        # this read happens before any of the computation starts.

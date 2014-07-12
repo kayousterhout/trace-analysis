@@ -659,7 +659,7 @@ class Analyzer:
       compute_end = (serialize_end + task.compute_time_without_gc() - serialize_millis -
         task.executor_deserialize_time)
       gc_end = compute_end + task.gc_time
-      task_end = gc_end + task.shuffle_write_time
+      task_end = gc_end + task.shuffle_write_time + task.output_write_time
       if math.fabs((first_start + task_end) - task.finish_time) >= 0.1:
         print "!!!!!!!!!!!!!!!!Mismatch at index %s" % i
         print "%.1f" % (first_start + task_end)
@@ -681,7 +681,7 @@ class Analyzer:
       plot_file.write(LINE_TEMPLATE % (compute_end, i, gc_end, i, 4))
       plot_file.write(LINE_TEMPLATE % (gc_end, i, task_end, i, 5))
 
-    last_end = all_tasks[-1].finish_time
+    last_end = max([t.finish_time for t in all_tasks])
     ytics_str = ",".join(stage_cumulative_tasks)
     plot_file.write("set ytics (%s)\n" % ytics_str)
     plot_file.write("set xrange [0:%s]\n" % (last_end - first_start))
@@ -694,7 +694,7 @@ class Analyzer:
     plot_file.write("-1 ls 1 title 'Local read wait',\\\n")
     plot_file.write("-1 ls 2 title 'Network wait', -1 ls 3 title 'Compute', \\\n")
     plot_file.write("-1 ls 9 title 'Data (de)serialization', -1 ls 4 title 'GC', \\\n")
-    plot_file.write("-1 ls 5 title 'Disk write wait'\\\n")
+    plot_file.write("-1 ls 5 title 'Output write wait'\\\n")
     plot_file.close()
 
   def write_stage_info(self, query_id, prefix):
