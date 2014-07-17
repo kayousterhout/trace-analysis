@@ -55,6 +55,7 @@ class Task:
     cpu_utilization_numbers = [
       float(x.split(":")[1]) for x in items_dict["CPU_UTILIZATION"].split(",")]
     # Record the total CPU utilization as the total system CPU use + total user CPU use.
+    self.process_cpu_utilization = cpu_utilization_numbers[0] + cpu_utilization_numbers[1]
     self.total_cpu_utilization = cpu_utilization_numbers[2] + cpu_utilization_numbers[3]
 
     # Should be set to true if this task is a straggler and we know the cause of the
