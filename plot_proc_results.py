@@ -53,7 +53,7 @@ def write_running_tasks_plot(file_prefix, y2label, output_filename, running_task
   running_tasks_plot_file.write("set xlabel \"Time (ms)\"\n")
   #running_tasks_plot_file.write("set xrange [%s:%s]\n" %
   #  (experiment_duration - 1200000, experiment_duration - 1000000))
-  running_tasks_plot_file.write("set xrange [5000:10000]\n")
+  running_tasks_plot_file.write("set xrange [5000:]\n")
   running_tasks_plot_file.write("set y2tics\n")
   running_tasks_plot_file.write("set y2label \"%s\"\n" % y2label)
   running_tasks_plot_file.write("set output \"%s/%s.pdf\"\n\n" % (file_prefix, output_filename))
@@ -62,6 +62,8 @@ def write_running_tasks_plot(file_prefix, y2label, output_filename, running_task
       running_tasks_filename))
 
 def parse_proc_file(filename):
+  print "Parsing ", filename
+
   # List of tuples, where the first item is the time and the second
   # item is 1 if a task started at that time and -1 if a task
   # finished at that time.
