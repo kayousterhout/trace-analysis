@@ -12,9 +12,11 @@ class Query:
     analyzer = parse_logs.Analyzer(filename)
     self.total_input_size = 0
     self.total_shuffle_mb = 0
+    self.runtime = 0
     for stage in analyzer.stages.values():
       self.total_input_size += sum([t.input_mb for t in stage.tasks])
       self.total_shuffle_mb += sum([t.shuffle_mb_written for t in stage.tasks])
+      self.runtime += stage.finish_time() - stage.start_time
 
     # Get the SQL query for this file.
     self.sql = ""
@@ -48,7 +50,7 @@ def main(argv):
   for i, query in enumerate(sorted(queries_to_input_size.values(), key = lambda q: q.filename)):
     # Outputs 0 as the output size for now until more verbose output logging
     # gets added.
-    print i, query.num_joins, query.total_input_size, query.total_shuffle_mb, 0, query.filename
+    print i, query.num_joins, query.total_input_size, query.total_shuffle_mb, 0, query.filename, query.runtime
 
 if __name__ == "__main__":
   main(sys.argv[1:])
