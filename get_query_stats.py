@@ -44,7 +44,11 @@ def main(argv):
       query = Query(full_name)
 
       if query.sql in queries_to_input_size:
-        assert queries_to_input_size[query.sql].total_input_size == query.total_input_size
+        expected_input_size = queries_to_input_size[query.sql].total_input_size
+        if expected_input_size != query.total_input_size:
+          print ("Mismatch in query sizes: for query %s, %s not equal to %s" %
+            (query.sql, query.total_input_size, expected_input_size))
+          assert False
       elif not skip_load or query.num_joins > 0:
         queries_to_input_size[query.sql] = query
   for i, query in enumerate(sorted(queries_to_input_size.values(), key = lambda q: q.filename)):
