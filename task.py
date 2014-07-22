@@ -80,6 +80,9 @@ class Task:
       self.input_mb = float(items_dict["INPUT_BYTES"]) / 1048576.
 
     self.output_write_time = int(items_dict["OUTPUT_WRITE_BLOCKED_NANOS"]) / 1.0e6
+    self.output_mb = 0
+    if "OUTPUT_BYTES" in items_dict:
+      self.output_mb = int(items_dict["OUTPUT_BYTES"]) / 1048576.
 
     self.has_fetch = True
     # False if the task was a map task that did not run locally with its input data.
