@@ -434,14 +434,6 @@ class Analyzer:
     assert(total_runtime == total_fetch_wait + total_runtime_no_fetch)
     return total_fetch_wait * 1.0 / total_runtime
 
-  def fraction_time_using_network(self):
-    total_network_time = 0
-    total_runtime = 0
-    for stage in self.stages.values():
-      total_network_time += sum([t.network_time() for t in stage.tasks])
-      total_runtime += sum([t.runtime() for t in stage.tasks])
-    return total_network_time * 1.0 / total_runtime
-
   def no_input_disk_speedup(self):
     return self.calculate_speedup(
       "Computing speedup without disk input",
@@ -756,8 +748,6 @@ def parse(filename, agg_results_filename=None):
   print ("\nFraction time scheduler delay: %s" % fraction_time_scheduler_delay)
   fraction_time_waiting_on_network = analyzer.fraction_time_waiting_on_network()
   print "\nFraction time waiting on network: %s" % fraction_time_waiting_on_network
-  fraction_time_using_network = analyzer.fraction_time_using_network()
-  print "\nFraction time using network: %s" % fraction_time_using_network
   print ("\nFraction of fetch time spent reading from disk: %s" %
     analyzer.fraction_fetch_time_reading_from_disk())
   no_input_disk_speedup = analyzer.no_input_disk_speedup()
@@ -811,7 +801,7 @@ def parse(filename, agg_results_filename=None):
     f = open(agg_results_filename, "a")
     data = [
       filename.split("/")[1].split("_")[0],
-      no_network_speedup, fraction_time_waiting_on_network, fraction_time_using_network,
+      no_network_speedup, fraction_time_waiting_on_network,
       no_disk_speedup, fraction_time_using_disk,
       no_compute_speedup, fraction_time_serializing, fraction_time_computing,
       replace_all_tasks_with_average_speedup, no_stragglers_replace_with_median_speedup,

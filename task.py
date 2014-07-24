@@ -113,15 +113,6 @@ class Task:
     else:
       return self.input_mb
 
-  def network_time(self):
-    """ Returns the amount of time this task spent using the network.
-
-    This includes time where computation was parallelized with network.
-    """
-    if self.has_fetch:
-      return self.shuffle_finish_time - self.start_time - self.local_read_time
-    return 0
-
   def compute_time_without_gc(self):
      """ Returns the time this task spent computing.
      
