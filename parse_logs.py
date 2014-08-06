@@ -356,7 +356,7 @@ class Analyzer:
   def calculate_speedup(self, description, compute_base_runtime, compute_faster_runtime):
     """ Returns how much faster the job would have run if each task had a faster runtime.
 
-    Paramters:
+    Parameters:
       description: A description for the speedup, which will be printed to the command line.
       compute_base_runtime: Function that accepts a task and computes the runtime for that task.
         The resulting runtime will be used as the "base" time for the job, which the faster time
@@ -364,6 +364,11 @@ class Analyzer:
       compute_faster_runtime: Function that accepts a task and computes the new runtime for that
         task. The resulting job runtime will be compared to the job runtime using
         compute_base_runtime.
+
+    Returns:
+      A 3-item tuple: [relative speedup, original runtime, estimated new runtime]
+        TODO: Right now this doesn't return the actual original runtime; just the estimated one (so
+        that it is comparable to the estimated new one).
     """
     self.print_heading(description)
     # Making these single-element lists is a hack to ensure that they can be accessed from
@@ -401,7 +406,7 @@ class Analyzer:
       add_tasks_to_totals(tasks_for_combined_stages)
 
     print "Faster time: %s, base time: %s" % (total_faster_time[0], total_time[0])
-    return total_faster_time[0] * 1.0 / total_time[0]
+    return total_faster_time[0] * 1.0 / total_time[0], total_time[0], total_faster_time[0]
 
   def fraction_time_scheduler_delay(self):
     """ Of the total time spent across all machines in the cluster, what fraction of time was
@@ -750,22 +755,22 @@ def parse(filename, agg_results_filename=None):
   print "\nFraction time waiting on network: %s" % fraction_time_waiting_on_network
   print ("\nFraction of fetch time spent reading from disk: %s" %
     analyzer.fraction_fetch_time_reading_from_disk())
-  no_input_disk_speedup = analyzer.no_input_disk_speedup()
+  no_input_disk_speedup = analyzer.no_input_disk_speedup()[0]
   print "Speedup from eliminating disk for input: %s" % no_input_disk_speedup
-  no_output_disk_speedup = analyzer.no_output_disk_speedup()
+  no_output_disk_speedup = analyzer.no_output_disk_speedup()[0]
   print "Speedup from elimnating disk for output: %s" % no_output_disk_speedup
-  no_shuffle_write_disk_speedup = analyzer.no_shuffle_write_disk_speedup()
+  no_shuffle_write_disk_speedup = analyzer.no_shuffle_write_disk_speedup()[0]
   print "Speedup from eliminating disk for shuffle write: %s" % no_shuffle_write_disk_speedup
-  no_shuffle_read_disk_speedup = analyzer.no_shuffle_read_disk_speedup()
+  no_shuffle_read_disk_speedup = analyzer.no_shuffle_read_disk_speedup()[0]
   print "Speedup from eliminating shuffle read: %s" % no_shuffle_read_disk_speedup
-  no_disk_speedup = analyzer.no_disk_speedup()
+  no_disk_speedup, original_runtime, no_disk_runtime = analyzer.no_disk_speedup()
   print "No disk speedup: %s" % no_disk_speedup
   fraction_time_using_disk = analyzer.fraction_time_using_disk()
   print("\nFraction of time spent writing/reading shuffle data to/from disk: %s" %
     fraction_time_using_disk)
   print("\nFraction of time spent garbage collecting: %s" %
     analyzer.fraction_time_gc())
-  no_compute_speedup = analyzer.no_compute_speedup()
+  no_compute_speedup = analyzer.no_compute_speedup()[0]
   print "\nSpeedup from eliminating compute: %s" % no_compute_speedup
   fraction_time_waiting_on_compute = analyzer.fraction_time_waiting_on_compute()
   print "\nFraction of time waiting on compute: %s" % fraction_time_waiting_on_compute
@@ -808,7 +813,7 @@ def parse(filename, agg_results_filename=None):
       no_stragglers_replace_95_with_median_speedup, no_stragglers_perfect_parallelism,
       simulated_versus_actual, median_progress_rate_speedup,
       no_input_disk_speedup, no_output_disk_speedup,
-      no_shuffle_write_disk_speedup, no_shuffle_read_disk_speedup]
+      no_shuffle_write_disk_speedup, no_shuffle_read_disk_speedup, original_runtime, no_disk_runtime]
     analyzer.write_data_to_file(data, f)
     f.close()
     analyzer.write_straggler_info(filename, agg_results_filename)
