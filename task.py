@@ -18,10 +18,10 @@ class Task:
     self.finish_time = int(items_dict["FINISH_TIME"])
     self.executor = items_dict["HOST"]
     self.executor_run_time = int(items_dict["EXECUTOR_RUN_TIME"])
-    self.executor_deserialize_time = int(items_dict["EXECUTOR_DESERIALIZE_TIME"])
+    self.executor_deserialize_time = 0 #int(items_dict["EXECUTOR_DESERIALIZE_TIME"])
     self.scheduler_delay = (self.finish_time - self.executor_run_time -
       self.executor_deserialize_time - self.start_time)
-    self.gc_time = int(items_dict["GC_TIME"])
+    self.gc_time = 0 #int(items_dict["GC_TIME"])
     self.executor_id = int(items_dict["EXECUTOR_ID"])
 
     # Estimate serialization and deserialization time based on samples.
@@ -46,22 +46,22 @@ class Task:
     # Utilization metrics.
     # Map of device name to (utilization, read throughput, write throughout).
     self.disk_utilization = {}
-    utilization_str = items_dict["DISK_UTILIZATION"]
-    for block_utilization_str in utilization_str.split(";"):
-      if block_utilization_str:
-        device_name, numbers = block_utilization_str.split(":")
-        self.disk_utilization[device_name] = [float(x) for x in numbers.split(",")]
+    #utilization_str = items_dict["DISK_UTILIZATION"]
+    #for block_utilization_str in utilization_str.split(";"):
+    #  if block_utilization_str:
+    #    device_name, numbers = block_utilization_str.split(":")
+    #    self.disk_utilization[device_name] = [float(x) for x in numbers.split(",")]
 
-    network_throughput_items = [
-      float(x.split(":")[1]) for x in items_dict["NETWORK_UTILIZATION"].split(",")] 
-    self.network_bytes_transmitted_ps = network_throughput_items[1]
-    self.network_bytes_received_ps = network_throughput_items[0]
+    #network_throughput_items = [
+    #  float(x.split(":")[1]) for x in items_dict["NETWORK_UTILIZATION"].split(",")] 
+    self.network_bytes_transmitted_ps = 0 #network_throughput_items[1]
+    self.network_bytes_received_ps = 0 #network_throughput_items[0]
 
-    cpu_utilization_numbers = [
-      float(x.split(":")[1]) for x in items_dict["CPU_UTILIZATION"].split(",")]
+    #cpu_utilization_numbers = [
+    #  float(x.split(":")[1]) for x in items_dict["CPU_UTILIZATION"].split(",")]
     # Record the total CPU utilization as the total system CPU use + total user CPU use.
-    self.process_cpu_utilization = cpu_utilization_numbers[0] + cpu_utilization_numbers[1]
-    self.total_cpu_utilization = cpu_utilization_numbers[2] + cpu_utilization_numbers[3]
+    self.process_cpu_utilization = 0 #cpu_utilization_numbers[0] + cpu_utilization_numbers[1]
+    self.total_cpu_utilization = 0 #cpu_utilization_numbers[2] + cpu_utilization_numbers[3]
 
     # Should be set to true if this task is a straggler and we know the cause of the
     # straggler behavior.
@@ -79,12 +79,12 @@ class Task:
     self.input_read_time = 0
     self.input_read_method = "unknown"
     self.input_mb = 0
-    if INPUT_METHOD_KEY in items_dict:
+    if False: #INPUT_METHOD_KEY in items_dict:
       self.input_read_time = int(items_dict["READ_TIME_NANOS"]) / 1.0e6
       self.input_read_method = items_dict["READ_METHOD"]
       self.input_mb = float(items_dict["INPUT_BYTES"]) / 1048576.
 
-    self.output_write_time = int(items_dict["OUTPUT_WRITE_BLOCKED_NANOS"]) / 1.0e6
+    self.output_write_time = 0 #int(items_dict["OUTPUT_WRITE_BLOCKED_NANOS"]) / 1.0e6
     self.output_mb = 0
     if "OUTPUT_BYTES" in items_dict:
       self.output_mb = int(items_dict["OUTPUT_BYTES"]) / 1048576.
@@ -103,14 +103,14 @@ class Task:
     self.local_blocks_read = int(items_dict["BLOCK_FETCHED_LOCAL"])
     self.remote_blocks_read = int(items_dict["BLOCK_FETCHED_REMOTE"])
     self.remote_mb_read = int(items_dict["REMOTE_BYTES_READ"]) / 1048576.
-    self.local_mb_read = int(items_dict["LOCAL_READ_BYTES"]) / 1048576.
+    self.local_mb_read = 0 #int(items_dict["LOCAL_READ_BYTES"]) / 1048576.
     # The local read time is not included in the fetch wait time: the task blocks
     # on reading data locally in the BlockFetcherIterator.initialize() method.
-    self.local_read_time = int(items_dict["LOCAL_READ_TIME"])
+    self.local_read_time = 0 #int(items_dict["LOCAL_READ_TIME"])
     # TODO: This is not currently accurate due to page mapping.
     self.remote_disk_read_time = 0
       #int(items_dict["REMOTE_DISK_READ_TIME"])
-    self.total_time_fetching = int(items_dict["REMOTE_FETCH_TIME"])
+    self.total_time_fetching = 0
 
   def input_size_mb(self):
     if self.has_fetch:
