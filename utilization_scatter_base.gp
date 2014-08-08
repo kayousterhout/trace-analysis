@@ -1,4 +1,4 @@
-set terminal pdfcairo font 'Times,22' linewidth 4 rounded dashed dashlength 2
+set terminal pdfcairo font 'Times,22' linewidth 4 rounded dashed dashlength 2 size 20,12
 
 # Line style for axes
 set style line 80 lt 1 lc rgb "#808080"

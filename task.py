@@ -52,6 +52,11 @@ class Task:
         device_name, numbers = block_utilization_str.split(":")
         self.disk_utilization[device_name] = [float(x) for x in numbers.split(",")]
 
+    network_throughput_items = [
+      float(x.split(":")[1]) for x in items_dict["NETWORK_UTILIZATION"].split(",")] 
+    self.network_bytes_transmitted_ps = network_throughput_items[1]
+    self.network_bytes_received_ps = network_throughput_items[0]
+
     cpu_utilization_numbers = [
       float(x.split(":")[1]) for x in items_dict["CPU_UTILIZATION"].split(",")]
     # Record the total CPU utilization as the total system CPU use + total user CPU use.

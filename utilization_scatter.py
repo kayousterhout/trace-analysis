@@ -21,6 +21,8 @@ def main(argv):
       items = [task.start_time, task.executor_run_time, task.total_cpu_utilization]
       for block_device_numbers in task.disk_utilization.values():
         items.extend(block_device_numbers)
+      items.append(task.network_bytes_transmitted_ps / 125000000)
+      items.append(task.network_bytes_received_ps / 125000000)
       write_data_to_file(items, f)
     f.close()    
 
@@ -33,6 +35,10 @@ def main(argv):
     plot_file.write("plot \"%s\" using ($1-%s):4 with p title \"Disk1\",\\\n" %
       (stage_filename, start_time))
     plot_file.write("\"%s\" using ($1-%s):7 with p title \"Disk2\",\\\n" %
+      (stage_filename, start_time))
+    plot_file.write("\"%s\" using ($1-%s):13 with p title\"Network T\",\\\n" %
+      (stage_filename, start_time))
+    plot_file.write("\"%s\" using ($1-%s):14 with p title\"Network R\",\\\n" %
       (stage_filename, start_time))
     plot_file.write("\"%s\" using ($1-%s):($3/8) with p title \"CPU\"\n" %
       (stage_filename, start_time))
