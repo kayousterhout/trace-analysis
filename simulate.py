@@ -1,7 +1,7 @@
 import bisect
 
 """ Simulates the completion time of a set of tasks with the given runtimes, assuming 32 slots. """
-def simulate(task_runtimes, num_slots=32):
+def simulate(task_runtimes, num_slots=40):
   # Sorted list of task finish times, measured as the time from when the job started.
   finish_times = []
   # Start and finish time for each task.

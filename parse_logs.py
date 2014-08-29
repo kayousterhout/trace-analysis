@@ -128,10 +128,13 @@ class Analyzer:
   def simulated_runtime_over_actual(self, prefix):
     simulated_runtime = self.get_simulated_runtime(waterfall_prefix=prefix)
     # TODO: Incorporate Shark setup time here!
+    print "Simulated runtime: ", simulated_runtime, "actual time: ", self.original_runtime()
+    return simulated_runtime * 1.0 / self.original_runtime()
+
+  def original_runtime(self):
     actual_start_time = min([s.start_time for s in self.stages.values()])
     actual_finish_time = max([s.finish_time() for s in self.stages.values()])
-    print "Simulated runtime: ", simulated_runtime, "actual time: ", actual_finish_time - actual_start_time
-    return simulated_runtime * 1.0 / (actual_finish_time - actual_start_time)
+    return actual_finish_time - actual_start_time
 
   def write_data_to_file(self, data, file_handle):
     stringified_data = [str(x) for x in data]
@@ -418,13 +421,7 @@ class Analyzer:
       total_runtime += stage.total_runtime()
     return total_scheduler_delay * 1.0 / total_runtime
 
-  def network_speedup(self, relative_fetch_time):
-    return self.calculate_speedup(
-      "Computing speedup with %s relative fetch time" % relative_fetch_time,
-      lambda t: t.runtime(),
-      lambda t: t.runtime_faster_fetch(relative_fetch_time))
-
-  def fraction_time_waiting_on_network(self):
+  def fraction_time_waiting_on_shuffle_read(self):
     """ Of the total time spent across all machines in the cluster, what fraction of time was
     spent waiting on the network? """
     total_fetch_wait = 0
@@ -468,6 +465,12 @@ class Analyzer:
       "Computing speedup without disk",
       lambda t: t.runtime(),
       lambda t: t.runtime_no_disk())
+
+  def no_gc_speedup(self):
+    return self.calculate_speedup(
+      "Computing speedup without gc",
+      lambda t: t.runtime(),
+      lambda t: t.runtime() - t.gc_time)
 
   def fraction_fetch_time_reading_from_disk(self):
     total_time_fetching = sum([s.total_time_fetching() for s in self.stages.values()])
@@ -706,10 +709,7 @@ class Analyzer:
         last_stage_finish_time = stage.finish_time()
         last_stage_runtime = stage.finish_time() - stage.start_time
 
-    start_time = min([s.start_time for s in self.stages.values()])
-    finish_time = max([s.finish_time() for s in self.stages.values()])
-
-    f.write("%s\t%s\t%s\n" % (query_id, last_stage_runtime, finish_time - start_time))
+    f.write("%s\t%s\t%s\n" % (query_id, last_stage_runtime, self.original_runtime()))
     f.close()
 
   def make_cdfs_for_performance_model(self, prefix):
@@ -735,24 +735,10 @@ def parse(filename, agg_results_filename=None):
 
   analyzer.write_waterfall(filename)
 
-  # Compute the speedup for a fetch time of 1.0 as a sanity check!
-  # relative_fetch_time is a multipler that describes how long the fetch took relative to how
-  # long it took in the original trace.  For example, a relative_fetch_time of 0 is for
-  # a network that shuffled data instantaneously, and a relative_fetch_time of 0.25
-  # is for a 4x faster network.
-  results_file = open("%s_improvements" % filename, "w")
-  no_network_speedup = -1
-  for relative_fetch_time in [0]:
-    faster_fetch_speedup = analyzer.network_speedup(relative_fetch_time)
-    print "Speedup from relative fetch of %s: %s" % (relative_fetch_time, faster_fetch_speedup)
-    if relative_fetch_time == 0:
-      no_network_speedup = faster_fetch_speedup
-    results_file.write("%s %s\n" % (relative_fetch_time, faster_fetch_speedup))
-
   fraction_time_scheduler_delay = analyzer.fraction_time_scheduler_delay()
   print ("\nFraction time scheduler delay: %s" % fraction_time_scheduler_delay)
-  fraction_time_waiting_on_network = analyzer.fraction_time_waiting_on_network()
-  print "\nFraction time waiting on network: %s" % fraction_time_waiting_on_network
+  fraction_time_waiting_on_shuffle_read = analyzer.fraction_time_waiting_on_shuffle_read()
+  print "\nFraction time waiting on shuffle read: %s" % fraction_time_waiting_on_shuffle_read
   print ("\nFraction of fetch time spent reading from disk: %s" %
     analyzer.fraction_fetch_time_reading_from_disk())
   no_input_disk_speedup = analyzer.no_input_disk_speedup()[0]
@@ -761,9 +747,10 @@ def parse(filename, agg_results_filename=None):
   print "Speedup from elimnating disk for output: %s" % no_output_disk_speedup
   no_shuffle_write_disk_speedup = analyzer.no_shuffle_write_disk_speedup()[0]
   print "Speedup from eliminating disk for shuffle write: %s" % no_shuffle_write_disk_speedup
-  no_shuffle_read_disk_speedup = analyzer.no_shuffle_read_disk_speedup()[0]
+  no_shuffle_read_disk_speedup, throw_away, no_shuffle_read_runtime = \
+    analyzer.no_shuffle_read_disk_speedup()
   print "Speedup from eliminating shuffle read: %s" % no_shuffle_read_disk_speedup
-  no_disk_speedup, original_runtime, no_disk_runtime = analyzer.no_disk_speedup()
+  no_disk_speedup, simulated_original_runtime, no_disk_runtime = analyzer.no_disk_speedup()
   print "No disk speedup: %s" % no_disk_speedup
   fraction_time_using_disk = analyzer.fraction_time_using_disk()
   print("\nFraction of time spent writing/reading shuffle data to/from disk: %s" %
@@ -806,14 +793,17 @@ def parse(filename, agg_results_filename=None):
     f = open(agg_results_filename, "a")
     data = [
       filename.split("/")[1].split("_")[0],
-      no_network_speedup, fraction_time_waiting_on_network,
+      fraction_time_waiting_on_shuffle_read,
       no_disk_speedup, fraction_time_using_disk,
       no_compute_speedup, fraction_time_serializing, fraction_time_computing,
       replace_all_tasks_with_average_speedup, no_stragglers_replace_with_median_speedup,
       no_stragglers_replace_95_with_median_speedup, no_stragglers_perfect_parallelism,
       simulated_versus_actual, median_progress_rate_speedup,
       no_input_disk_speedup, no_output_disk_speedup,
-      no_shuffle_write_disk_speedup, no_shuffle_read_disk_speedup, original_runtime, no_disk_runtime]
+      no_shuffle_write_disk_speedup, no_shuffle_read_disk_speedup,
+      analyzer.original_runtime(), simulated_original_runtime, no_disk_runtime, 
+      no_shuffle_read_runtime,
+      analyzer.no_gc_speedup()[0]]
     analyzer.write_data_to_file(data, f)
     f.close()
     analyzer.write_straggler_info(filename, agg_results_filename)
