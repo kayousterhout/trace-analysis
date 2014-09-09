@@ -2,7 +2,7 @@ import sys
 
 import parse_logs
 
-NUM_MACHINES = 5
+NUM_MACHINES = 100
 DISKS_PER_MACHINE = 2
 CPUS_PER_MACHINE = 8
 # Estimate of reasonable disk throughput
@@ -20,16 +20,23 @@ def estimate(filename):
   min_job_cpu_millis = 0
   min_job_network_millis = 0
   min_job_disk_millis = 0
+
+  # Used as a sanity check: shuffle write and shuffle read should be the same.
+  all_stages_shuffle_write_mb = 0
+  all_stages_shuffle_read_mb = 0
+  all_stages_disk_input_mb = 0
   for id in sorted(analyzer.stages.keys(), reverse=True):
     stage = analyzer.stages[id]
     total_cpu_milliseconds = 0
     total_disk_input_data = 0
     total_hdfs_output_data = 0
     total_remote_mb_read = 0
+    total_shuffle_read_mb = 0
     total_shuffle_write_mb = 0
     total_machine_time_spent = 0
     total_runtime_incl_delay = 0
 
+    print "*****STAGE has %s tasks" % len(stage.tasks)
     for task in stage.tasks:
       total_cpu_milliseconds += task.process_cpu_utilization * task.executor_run_time
       if task.input_read_method != "Memory":
@@ -40,7 +47,13 @@ def estimate(filename):
       total_hdfs_output_data += task.output_mb
       if task.has_fetch:
         total_remote_mb_read += task.remote_mb_read
-        total_disk_input_data += task.local_mb_read
+        # Remote MB still need to be read from disk.
+        shuffle_mb = task.local_mb_read + task.remote_mb_read
+        total_disk_input_data += shuffle_mb
+        total_shuffle_read_mb += shuffle_mb
+    all_stages_shuffle_write_mb += total_shuffle_write_mb
+    all_stages_shuffle_read_mb += total_shuffle_read_mb
+    all_stages_disk_input_mb += total_disk_input_data
     print "*******************Stage runtime: ", stage.finish_time() - stage.start_time
 
     print "Total millis across all tasks: ", total_machine_time_spent
@@ -49,6 +62,7 @@ def estimate(filename):
     min_cpu_milliseconds = total_cpu_milliseconds / (NUM_MACHINES * CPUS_PER_MACHINE)
     print "Total input MB: ", total_disk_input_data
     print "Total remote MB: ", total_remote_mb_read
+    print "Total shuffle read MB: ", total_shuffle_read_mb
     print "Total output MB: ", total_hdfs_output_data
     total_input_disk_milliseconds = 1000 * total_disk_input_data / DISK_MB_PER_SECOND
     # TODO: This doesn't include logging for the disk output size, which currently needs to be done
@@ -85,6 +99,8 @@ def estimate(filename):
   print "Min network milliseconds for job", min_job_network_millis, "milliseconds"
   print "Min disk milliseconds for job", min_job_disk_millis, "milliseconds"
   print "Actual job runtime:", actual_job_runtime, "milliseconds"
+  print ("Shuffle write MB: %s, read MB: %s, all input: %s" %
+    (all_stages_shuffle_write_mb, all_stages_shuffle_read_mb, all_stages_disk_input_mb))
   return (total_not_pipelined_runtime, total_job_runtime, min_job_cpu_millis,
     min_job_network_millis, min_job_disk_millis)
 
