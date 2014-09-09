@@ -68,7 +68,8 @@ def main(argv):
 
       # Compute disk breakeven speed (in MB/s).
       # Shuffled data has to be written to disk and later read back, so multiply by 2.
-      total_disk_mb = query.total_input_mb + 2 * query.total_shuffle_mb + 2 * query.total_output_mb
+      # Output data has to be written to 3 disks.
+      total_disk_mb = query.total_input_mb + 2 * query.total_shuffle_mb + 3 * query.total_output_mb
       # To compute the breakeven speed, need to normalize for the number of disks per machine (2) and
       # number of cores (8).
       disk_breakeven_speeds.append((total_disk_mb / 2.) / (query.total_cpu_time / (8 * 1000.)))
