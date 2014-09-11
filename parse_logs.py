@@ -743,7 +743,7 @@ def parse(filename, agg_results_filename=None):
   results_file = open("%s_improvements" % filename, "w")
   no_network_speedup = -1
   for relative_fetch_time in [0]:
-    faster_fetch_speedup = analyzer.network_speedup(relative_fetch_time)
+    faster_fetch_speedup = analyzer.network_speedup(relative_fetch_time)[0]
     print "Speedup from relative fetch of %s: %s" % (relative_fetch_time, faster_fetch_speedup)
     if relative_fetch_time == 0:
       no_network_speedup = faster_fetch_speedup
