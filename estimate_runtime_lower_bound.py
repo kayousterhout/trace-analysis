@@ -2,7 +2,7 @@ import sys
 
 import parse_logs
 
-NUM_MACHINES = 100
+NUM_MACHINES = 5
 DISKS_PER_MACHINE = 2
 CPUS_PER_MACHINE = 8
 # Estimate of reasonable disk throughput
@@ -18,6 +18,7 @@ def estimate(filename):
   total_job_runtime = 0
   actual_job_runtime = 0
   min_job_cpu_millis = 0
+  total_job_cpu_millis = 0
   min_job_network_millis = 0
   min_job_disk_millis = 0
 
@@ -86,6 +87,7 @@ def estimate(filename):
     actual_job_runtime += stage.finish_time() - stage.start_time
 
     min_job_cpu_millis += min_cpu_milliseconds
+    total_job_cpu_millis += total_cpu_milliseconds
     min_job_network_millis += min_network_milliseconds
     min_job_disk_millis += min_disk_milliseconds
 
@@ -93,17 +95,17 @@ def estimate(filename):
   print "Total pipelined job runtime:", total_job_runtime, "milliseconds"
   total_not_pipelined_runtime = min_job_cpu_millis + min_job_network_millis + min_job_disk_millis
   print "Total not pipelined job runtime:", total_not_pipelined_runtime, "milliseconds"
-  print "Min CPU milliseconds for job", min_job_cpu_millis, "milliseconds"
+  print "Min CPU milliseconds for job: %s milliseconds (%s total)" % (min_job_cpu_millis, total_job_cpu_millis)
   print "Min network milliseconds for job", min_job_network_millis, "milliseconds"
   print "Min disk milliseconds for job", min_job_disk_millis, "milliseconds"
   print "Actual job runtime:", actual_job_runtime, "milliseconds"
   print ("Shuffle write MB: %s, read MB: %s, all input: %s" %
     (all_stages_shuffle_write_mb, all_stages_shuffle_read_mb, all_stages_disk_input_mb))
   return (total_not_pipelined_runtime, total_job_runtime, min_job_cpu_millis,
-    min_job_network_millis, min_job_disk_millis)
+    min_job_network_millis, min_job_disk_millis, total_job_cpu_millis)
 
 def main(argv):
-  estimate(argv[0])
+  print estimate(argv[0])
 
 if __name__ == "__main__":
   main(sys.argv[1:])
