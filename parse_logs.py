@@ -460,6 +460,12 @@ class Analyzer:
       lambda t: t.runtime(),
       lambda t: t.runtime_no_shuffle_read())
 
+  def no_network_speedup(self):
+    return self.calculate_speedup(
+      "Computing speedup without network",
+      lambda t: t.runtime(),
+      lambda t: t.runtime_no_network())
+
   def no_disk_speedup(self):
     return self.calculate_speedup(
       "Computing speedup without disk",
@@ -753,6 +759,8 @@ def parse(filename, agg_results_filename=None):
   no_disk_speedup, simulated_original_runtime, no_disk_runtime = analyzer.no_disk_speedup()
   print "No disk speedup: %s" % no_disk_speedup
   fraction_time_using_disk = analyzer.fraction_time_using_disk()
+  no_network_speedup, not_used, no_network_runtime = analyzer.no_network_speedup()
+  print "No network speedup: %s" % no_network_speedup
   print("\nFraction of time spent writing/reading shuffle data to/from disk: %s" %
     fraction_time_using_disk)
   print("\nFraction of time spent garbage collecting: %s" %
@@ -803,7 +811,7 @@ def parse(filename, agg_results_filename=None):
       no_shuffle_write_disk_speedup, no_shuffle_read_disk_speedup,
       analyzer.original_runtime(), simulated_original_runtime, no_disk_runtime, 
       no_shuffle_read_runtime,
-      analyzer.no_gc_speedup()[0]]
+      analyzer.no_gc_speedup()[0], no_network_speedup, no_network_runtime]
     analyzer.write_data_to_file(data, f)
     f.close()
     analyzer.write_straggler_info(filename, agg_results_filename)

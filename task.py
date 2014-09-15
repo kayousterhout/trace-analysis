@@ -254,3 +254,12 @@ class Task:
   def runtime_faster_fetch(self, relative_fetch_time):
     return self.finish_time_faster_fetch(relative_fetch_time) - self.start_time
 
+  def runtime_no_network(self):
+    runtime_no_in_or_out = self.runtime_no_output()
+    if not self.data_local:
+      runtime_no_in_or_out -= self.input_read_time
+    if self.has_fetch:
+      return runtime_no_in_or_out - self.fetch_wait
+    else:
+      return runtime_no_in_or_out
+

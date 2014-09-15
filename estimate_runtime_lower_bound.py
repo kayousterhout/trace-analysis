@@ -65,9 +65,6 @@ def estimate(filename):
     print "Total shuffle read MB: ", total_shuffle_read_mb
     print "Total output MB: ", total_hdfs_output_data
     total_input_disk_milliseconds = 1000 * total_disk_input_data / DISK_MB_PER_SECOND
-    # TODO: This doesn't include logging for the disk output size, which currently needs to be done
-    # manually.
-    print "Total shuffle write MB: ", total_shuffle_write_mb
     total_output_disk_milliseconds = 1000* ((total_shuffle_write_mb + total_hdfs_output_data) /
       DISK_MB_PER_SECOND)
 
@@ -77,6 +74,7 @@ def estimate(filename):
     print "Min disk millis: %s, min cpu millis: %s" % (min_disk_milliseconds, min_cpu_milliseconds)
     # Add twice the amount of HDFS output data because the data needs to be sent to two locations.
 
+    print "Total shuffle write MB: ", total_shuffle_write_mb
     total_network_mb = total_remote_mb_read + 2 * total_hdfs_output_data
     total_network_milliseconds = 1000 * total_network_mb / NETWORK_MB_PER_SECOND
     min_network_milliseconds = total_network_milliseconds / NUM_MACHINES
