@@ -220,6 +220,12 @@ class Task:
     else:
       return self.runtime()
 
+  def runtime_no_remote_shuffle_read(self):
+    if self.has_fetch:
+      return self.finish_time - self.fetch_wait - self.start_time
+    else:
+      return self.runtime()
+
   def runtime_no_output(self):
     new_finish_time = self.finish_time - self.output_write_time
     return new_finish_time - self.start_time
@@ -227,32 +233,6 @@ class Task:
   def runtime_no_input_or_output(self):
     new_finish_time = self.finish_time - self.input_read_time - self.output_write_time
     return new_finish_time - self.start_time
-
-  def finish_time_faster_fetch(self, relative_fetch_time):
-    """ Returns the finish time of the job if the fetch had completed faster.
-
-    This method is approximate unless relative_fetch_time is 0 (the fetch completed inifinitely
-    fast) or 1 (the fetch completed in the same time as in the original job).
-    """
-    if not self.has_fetch:
-      return self.finish_time
-
-    self.log_verbose()
-
-    # If the fetch wait time is > 0, assume the network was in use the entire shuffle time
-    # (i.e., we were never blocked waiting on the computation).
-    # The problem with doing the more accurate version where we simulate the entire fetch
-    # process is that we need to exactly replicate the algorithm used by BlockFetcherIterator,
-    # which is quite complex.
-    network_time = self.shuffle_finish_time - self.start_time
-    faster_network_time = relative_fetch_time * network_time
-    # During the shuffle, if we weren't waiting for the network, then we were computing.
-    compute_time = network_time - self.fetch_wait
-    new_fetch_wait = max(0, faster_network_time - compute_time)
-    return self.finish_time - self.fetch_wait + new_fetch_wait
-
-  def runtime_faster_fetch(self, relative_fetch_time):
-    return self.finish_time_faster_fetch(relative_fetch_time) - self.start_time
 
   def runtime_no_network(self):
     runtime_no_in_or_out = self.runtime_no_output()

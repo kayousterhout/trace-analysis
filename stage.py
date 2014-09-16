@@ -46,8 +46,8 @@ class Stage:
   def total_fetch_wait(self):
     return sum([t.fetch_wait for t in self.tasks if t.has_fetch])
 
-  def total_runtime_no_fetch(self):
-    return sum([t.runtime_faster_fetch(0) for t in self.tasks])
+  def total_runtime_no_remote_shuffle_read(self):
+    return sum([t.runtime_no_remote_shuffle_read() for t in self.tasks])
 
   def total_time_fetching(self):
     return sum([t.total_time_fetching for t in self.tasks if t.has_fetch])
@@ -132,6 +132,17 @@ class Stage:
     straggler_time = sum([t.runtime() for t in attributable_stragglers])
     return len(attributable_stragglers), straggler_time, non_local
 
+  def hdfs_write_stragglers(self):
+    """ Returns the number of and total time taken by stragglers caused by slow HDFS writes,
+    as well as the number of those stragglers that had non-local reads.
+
+    Considers a task a straggler if its processing rate is more than 1.5x the median. """
+    def progress_rate_wo_hdfs_write(task):
+      return (task.runtime() - task.output_write_time) * 1.0 / task.input_size_mb()
+    attributable_stragglers = self.get_attributable_stragglers(progress_rate_wo_hdfs_write)
+    straggler_time = sum([t.runtime() for t in attributable_stragglers])
+    return len(attributable_stragglers), straggler_time
+
   def network_stragglers(self):
     """ Returns the number of and total time taken by stragglers caused by poor network performance.
 
@@ -161,6 +172,11 @@ class Stage:
     def progress_rate_wo_gc(task):
       return (task.runtime() - task.gc_time) * 1.0 / task.input_size_mb()
     return self.get_attributable_stragglers_stats(progress_rate_wo_gc)
+
+  def shuffle_write_stragglers(self):
+    def progress_rate_wo_shuffle_write(task):
+      return (task.runtime() - task.shuffle_write_time) * 1.0 / task.input_size_mb()
+    return self.get_attributable_stragglers_stats(progress_rate_wo_shuffle_write)
 
   def jit_stragglers(self):
     executor_to_task_finish_times = collections.defaultdict(list)

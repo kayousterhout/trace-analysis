@@ -70,6 +70,7 @@ def main(argv):
     # Outputs 0 as the output size for now until more verbose output logging
     # gets added.
     runtimes = query_sql_to_runtimes[query.sql]
+    print "%s queries for %s" % (len(runtimes), query.sql[:15])
     no_disk_runtimes = query_sql_to_no_disk_runtimes[query.sql]
     to_write = [i, query.num_joins, query.total_input_size, query.total_shuffle_mb,
       query.total_output_mb, query.filename, numpy.mean(runtimes), min(runtimes), max(runtimes),

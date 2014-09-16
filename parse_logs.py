@@ -182,6 +182,10 @@ class Analyzer:
     hdfs_read_stragglers_time = sum([x[1] for x in hdfs_read_stragglers_info])
     hdfs_read_stragglers_non_local = sum([x[2] for x in hdfs_read_stragglers_info])
 
+    hdfs_write_stragglers_info = [s.hdfs_write_stragglers() for s in self.stages.values()]
+    hdfs_write_stragglers_count = sum([x[0] for x in hdfs_write_stragglers_info])
+    hdfs_write_stragglers_time = sum([x[1] for x in hdfs_write_stragglers_info])
+
     gc_straggler_info = [s.gc_stragglers() for s in self.stages.values()]
     gc_straggler_count = sum([x[0] for x in gc_straggler_info])
     gc_straggler_time = sum([x[1] for x in gc_straggler_info])
@@ -193,6 +197,10 @@ class Analyzer:
     scheduler_delay_straggler_info = [s.scheduler_delay_stragglers() for s in self.stages.values()]
     scheduler_delay_straggler_count = sum([x[0] for x in scheduler_delay_straggler_info])
     scheduler_delay_straggler_time = sum([x[1] for x in scheduler_delay_straggler_info])
+
+    shuffle_write_straggler_info = [s.shuffle_write_stragglers() for s in self.stages.values()]
+    shuffle_write_straggler_count = sum([x[0] for x in shuffle_write_straggler_info])
+    shuffle_write_straggler_time = sum([x[1] for x in shuffle_write_straggler_info])
 
     scheduler_and_read_stragger_info = [s.hdfs_read_and_scheduler_delay_stragglers()
       for s in self.stages.values()]
@@ -209,16 +217,28 @@ class Analyzer:
 
     f = open(filename, "a")
     data_to_write = [job_name, total_tasks, total_runtime,
+      # 3 4 5
       len(explained_stragglers), explained_stragglers_total_time, len(all_stragglers),
+      # 6 7
       total_traditional_stragglers, total_traditional_straggler_time,
+      # 8
       traditional_stragglers_explained_by_progress_rate,
+      # 9 10
       progress_rate_straggler_count, progress_rate_straggler_time,
+      # 11 12 13
       hdfs_read_stragglers_count, hdfs_read_stragglers_time, hdfs_read_stragglers_non_local,
+      # 14 15
       gc_straggler_count, gc_straggler_time,
+      # 16 17
       network_straggler_count, network_straggler_time,
+      # 18 19
       scheduler_delay_straggler_count, scheduler_delay_straggler_time,
+      # 20 21
       scheduler_and_read_straggler_count, scheduler_and_read_straggler_time,
-      jit_straggler_count]
+      # 22
+      jit_straggler_count,
+      shuffle_write_straggler_count, shuffle_write_straggler_time,
+      hdfs_write_stragglers_count, hdfs_write_stragglers_time]
     self.write_data_to_file(data_to_write, f)
     f.close()
 
@@ -425,15 +445,15 @@ class Analyzer:
     """ Of the total time spent across all machines in the cluster, what fraction of time was
     spent waiting on the network? """
     total_fetch_wait = 0
-    # This is just used as a sanity check: total_runtime_no_fetch + total_fetch_wait
+    # This is just used as a sanity check: total_runtime_no_shuffle_read + total_fetch_wait
     # should equal total_runtime.
-    total_runtime_no_fetch = 0
+    total_runtime_no_shuffle_read = 0
     total_runtime = 0
     for id, stage in self.stages.iteritems():
       total_fetch_wait += stage.total_fetch_wait()
-      total_runtime_no_fetch += stage.total_runtime_no_fetch()
+      total_runtime_no_shuffle_read += stage.total_runtime_no_remote_shuffle_read()
       total_runtime += stage.total_runtime()
-    assert(total_runtime == total_fetch_wait + total_runtime_no_fetch)
+    assert(total_runtime == total_fetch_wait + total_runtime_no_shuffle_read)
     return total_fetch_wait * 1.0 / total_runtime
 
   def no_input_disk_speedup(self):
