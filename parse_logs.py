@@ -187,7 +187,7 @@ class Analyzer:
     progress_rate_straggler_count = sum([x[0] for x in progress_rate_straggler_info])
     progress_rate_straggler_time = sum([x[1] for x in progress_rate_straggler_info])
 
-    output_progress_rate_straggler_info = [s.output_progress_rate_stragglers()
+    output_progress_rate_straggler_info = [s.output_progress_rate_stragglers() \
       for s in self.stages.values()]
     output_progress_rate_straggler_count = sum([x[0] for x in output_progress_rate_straggler_info])
     output_progress_rate_straggler_time = sum([x[1] for x in output_progress_rate_straggler_info])

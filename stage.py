@@ -131,7 +131,6 @@ class Stage:
 
   def output_progress_rate_stragglers(self):
     "Returns stats about stragglers that can be attributed to output data size. """
-    return 0, 0
     def progress_rate_based_on_output(task):
       return (task.runtime() / (task.shuffle_mb_written + task.output_mb))
     attributable_stragglers = self.get_attributable_stragglers(progress_rate_based_on_output)
