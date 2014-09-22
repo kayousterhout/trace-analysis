@@ -53,7 +53,7 @@ def main(argv):
 
       if query.sql in query_sql_to_data:
         expected_input_size = query_sql_to_data[query.sql].total_input_size
-        if expected_input_size != query.total_input_size:
+        if abs(expected_input_size - query.total_input_size) > 100000:
           print ("Mismatch in query sizes: for query %s, %s not equal to %s" %
             (query.sql, query.total_input_size, expected_input_size))
           assert False

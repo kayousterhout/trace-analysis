@@ -1,6 +1,7 @@
 import collections
 import numpy
 from task import Task
+import concurrency
 
 class Stage:
   def __init__(self):
@@ -17,15 +18,18 @@ class Stage:
     else:
       input_method = self.tasks[0].input_read_method
     return (("%s tasks (avg runtime: %s, max runtime: %s) Start: %s, runtime: %s, "
+      "Max concurrency: %s, "
       "Input MB: %s (from %s), Output MB: %s, Straggers: %s, Progress rate straggers: %s, "
       "Progress rate stragglers explained by scheduler delay (%s), HDFS read (%s), "
-      "HDFS and read (%s), GC (%s), Network (%s), JIT (%s)") %
+      "HDFS and read (%s), GC (%s), Network (%s), JIT (%s), output rate stragglers: %s") %
       (len(self.tasks), self.average_task_runtime(), max_task_runtime, self.start_time,
-       self.finish_time() - self.start_time, self.input_mb(), input_method, self.output_mb(),
+       self.finish_time() - self.start_time, concurrency.get_max_concurrency(self.tasks),
+       self.input_mb(), input_method, self.output_mb(),
        self.traditional_stragglers(), self.progress_rate_stragglers()[0],
        self.scheduler_delay_stragglers()[0], self.hdfs_read_stragglers()[0],
        self.hdfs_read_and_scheduler_delay_stragglers()[0], self.gc_stragglers()[0],
-       self.network_stragglers()[0], self.jit_stragglers()))
+       self.network_stragglers()[0], self.jit_stragglers()[0],
+       self.output_progress_rate_stragglers()[0]))
 
   def verbose_str(self):
     # Get info about the longest task.
@@ -36,6 +40,11 @@ class Stage:
         max_runtime = task.runtime()
         max_index = i
     return "%s\n    Longest Task: %s" % (self, self.tasks[i])    
+
+  def conservative_finish_time(self):
+    # Subtract scheduler delay to account for asynchrony in the scheduler where sometimes tasks
+    # aren't marked as finished until a few ms later.
+    return max([(t.finish_time - t.scheduler_delay) for t in self.tasks])
 
   def finish_time(self):
     return max([t.finish_time for t in self.tasks])
@@ -120,6 +129,15 @@ class Stage:
     attributable_stragglers = self.get_attributable_stragglers(progress_rate_fn)
     return len(attributable_stragglers), sum([t.runtime() for t in attributable_stragglers])
 
+  def output_progress_rate_stragglers(self):
+    "Returns stats about stragglers that can be attributed to output data size. """
+    return 0, 0
+    def progress_rate_based_on_output(task):
+      return (task.runtime() / (task.shuffle_mb_written + task.output_mb))
+    attributable_stragglers = self.get_attributable_stragglers(progress_rate_based_on_output)
+    straggler_time = sum([t.runtime() for t in attributable_stragglers])
+    return len(attributable_stragglers), straggler_time
+
   def hdfs_read_stragglers(self):
     """ Returns the number of and total time taken by stragglers caused by slow HDFS reads,
     as well as the number of those stragglers that had non-local reads.
@@ -198,13 +216,15 @@ class Stage:
       for t in self.get_tasks_with_non_zero_input()])
     median_virgin_task_progress_rate = numpy.median([progress_rate(t) for t in virgin_tasks])
     jit_stragglers = 0
+    total_time = 0
     for task in virgin_tasks:
       task_progress_rate = progress_rate(task)
       if task_progress_rate >= 1.5*median_task_progress_rate:
         if task_progress_rate < 1.5*median_virgin_task_progress_rate:
           jit_stragglers += 1
+          total_time += task.runtime()
           task.straggler_behavior_explained = True
-    return jit_stragglers
+    return jit_stragglers, total_time
 
   def task_runtimes_with_median_progress_rate(self):
     """ Returns task runtimes using the Dolly method to eliminate stragglers.

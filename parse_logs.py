@@ -4,6 +4,7 @@ import math
 import numpy
 import sys
 
+import concurrency
 import simulate
 import stage
 import task
@@ -59,7 +60,7 @@ class Analyzer:
     # (there should just be two stages, at the beginning, that overlap and run concurrently).
     # This computation assumes that not more than two stages overlap.
     print ["%s: %s tasks" % (id, len(s.tasks)) for id, s in self.stages.iteritems()]
-    start_and_finish_times = [(id, s.start_time, s.finish_time())
+    start_and_finish_times = [(id, s.start_time, s.conservative_finish_time())
         for id, s in self.stages.iteritems()]
     start_and_finish_times.sort(key = lambda x: x[1])
     self.overlap = 0
@@ -79,6 +80,13 @@ class Analyzer:
         previous_id = id
 
     print "Stages to combine: ", self.stages_to_combine
+
+    self.combined_stages_concurrency = -1
+    if len(self.stages_to_combine) > 0:
+      tasks_for_combined_stages = []
+      for stage_id in self.stages_to_combine:
+        tasks_for_combined_stages.extend(self.stages[stage_id].tasks)
+      self.combined_stages_concurrency = concurrency.get_max_concurrency(tasks_for_combined_stages)
 
   def all_tasks(self):
     """ Returns a list of all tasks. """
@@ -108,14 +116,16 @@ class Analyzer:
         tasks_for_combined_stages.extend(stage.tasks)
       else:
         tasks = sorted(stage.tasks, key = lambda task: task.start_time)
-        simulated_runtime, start_finish_times = simulate.simulate([t.runtime() for t in tasks])
+        simulated_runtime, start_finish_times = simulate.simulate(
+          [t.runtime() for t in tasks], concurrency.get_max_concurrency(tasks))
         start_finish_times_adjusted = [
           (start + total_runtime, finish + total_runtime) for start, finish in start_finish_times]
         all_start_finish_times.append(start_finish_times_adjusted)
         total_runtime += simulated_runtime
     if len(tasks_for_combined_stages) > 0:
       tasks = sorted(tasks_for_combined_stages, key = lambda task: task.start_time)
-      simulated_runtime, start_finish_times = simulate.simulate([task.runtime() for task in tasks])
+      simulated_runtime, start_finish_times = simulate.simulate(
+        [task.runtime() for task in tasks], self.combined_stages_concurrency)
       start_finish_times_adjusted = [
         (start - simulated_runtime, finish - simulated_runtime) for start, finish in start_finish_times]
       all_start_finish_times.append(start_finish_times_adjusted)
@@ -177,6 +187,11 @@ class Analyzer:
     progress_rate_straggler_count = sum([x[0] for x in progress_rate_straggler_info])
     progress_rate_straggler_time = sum([x[1] for x in progress_rate_straggler_info])
 
+    output_progress_rate_straggler_info = [s.output_progress_rate_stragglers()
+      for s in self.stages.values()]
+    output_progress_rate_straggler_count = sum([x[0] for x in output_progress_rate_straggler_info])
+    output_progress_rate_straggler_time = sum([x[1] for x in output_progress_rate_straggler_info])
+
     hdfs_read_stragglers_info = [s.hdfs_read_stragglers() for s in self.stages.values()]
     hdfs_read_stragglers_count = sum([x[0] for x in hdfs_read_stragglers_info])
     hdfs_read_stragglers_time = sum([x[1] for x in hdfs_read_stragglers_info])
@@ -207,7 +222,9 @@ class Analyzer:
     scheduler_and_read_straggler_count = sum([x[0] for x in scheduler_and_read_stragger_info])
     scheduler_and_read_straggler_time = sum([x[1] for x in scheduler_and_read_stragger_info])
 
-    jit_straggler_count = sum([s.jit_stragglers() for s in self.stages.values()])
+    jit_straggler_info = [s.jit_stragglers() for s in self.stages.values()]
+    jit_straggler_count = sum([x[0] for x in jit_straggler_info])
+    jit_straggler_time = sum([x[1] for x in jit_straggler_info])
 
     all_stragglers = []
     for s in self.stages.values():
@@ -237,31 +254,65 @@ class Analyzer:
       scheduler_and_read_straggler_count, scheduler_and_read_straggler_time,
       # 22
       jit_straggler_count,
+      # 23 24
       shuffle_write_straggler_count, shuffle_write_straggler_time,
-      hdfs_write_stragglers_count, hdfs_write_stragglers_time]
+      # 25 26
+      hdfs_write_stragglers_count, hdfs_write_stragglers_time,
+      # 27 28
+      output_progress_rate_straggler_count, output_progress_rate_straggler_time,
+      # 29
+      jit_straggler_time]
     self.write_data_to_file(data_to_write, f)
     f.close()
 
-  def median_progress_rate_speedup(self):
+  def median_progress_rate_speedup(self, prefix):
     """ Returns how fast the job would have run if all tasks had the median progress rate. """
     total_median_progress_rate_runtime = 0
     runtimes_for_combined_stages = []
+    all_start_finish_times = []
     for id, stage in self.stages.iteritems():
       median_rate_runtimes = stage.task_runtimes_with_median_progress_rate()
       if id in self.stages_to_combine:
         runtimes_for_combined_stages.extend(median_rate_runtimes)
       else:
-        total_median_progress_rate_runtime += simulate.simulate(median_rate_runtimes)[0]
+        no_stragglers_runtime, start_finish_times = simulate.simulate(
+          median_rate_runtimes, concurrency.get_max_concurrency(stage.tasks))
+        start_finish_times_adjusted = [
+          (start + total_median_progress_rate_runtime, finish + total_median_progress_rate_runtime) \
+          for start, finish in start_finish_times]
+        total_median_progress_rate_runtime += no_stragglers_runtime
+        all_start_finish_times.append(start_finish_times_adjusted)
+
     if len(runtimes_for_combined_stages) > 0:
-      total_median_progress_rate_runtime += simulate.simulate(runtimes_for_combined_stages)[0]
+      no_stragglers_runtime, start_finish_times = simulate.simulate(
+        runtimes_for_combined_stages, self.combined_stages_concurrency)
+      start_finish_times_adjusted = [
+        (start + total_median_progress_rate_runtime, finish + total_median_progress_rate_runtime) \
+        for start, finish in start_finish_times]
+      total_median_progress_rate_runtime += no_stragglers_runtime
+      all_start_finish_times.append(start_finish_times_adjusted)
+
+    self.write_simulated_waterfall(all_start_finish_times, "%s_sim_median_progress_rate" % prefix)
     return total_median_progress_rate_runtime * 1.0 / self.get_simulated_runtime()
 
-  def no_stragglers_perfect_parallelism_speedup(self, num_slots=32):
+  def no_stragglers_perfect_parallelism_speedup(self):
     """ Returns how fast the job would have run if time were perfectly spread across 32 slots. """
-    total_runtime = sum([s.total_runtime() for s in self.stages.values()])
-    ideal_runtime = total_runtime * 1.0 / num_slots
-    # Simulate the runtime rather than using the actual one to sidestep issues with # of slots.
+    ideal_runtime = 0
+    total_runtime_combined_stages = 0
+    for id, stage in self.stages.iteritems():
+      if id in self.stages_to_combine:
+        total_runtime_combined_stages += stage.total_runtime()
+      else:
+        new_runtime = float(stage.total_runtime()) / concurrency.get_max_concurrency(stage.tasks)
+        print "New runtime: %s, original runtime: %s" % (new_runtime, stage.finish_time() - stage.start_time)
+        ideal_runtime += new_runtime
+
+
+    print "Total runtime combined: %s (concurrency %d" % (total_runtime_combined_stages, self.combined_stages_concurrency)
+    ideal_runtime += float(total_runtime_combined_stages) / self.combined_stages_concurrency
+    print "Getting simulated runtime"
     simulated_actual_runtime = self.get_simulated_runtime()
+    print "Ideal runtime for all: %s, simulated: %s" % (ideal_runtime, simulated_actual_runtime)
     return ideal_runtime / simulated_actual_runtime
 
   def replace_all_tasks_with_average_speedup(self, prefix):
@@ -279,7 +330,8 @@ class Analyzer:
       if id in self.stages_to_combine:
         averaged_runtimes_for_combined_stages.extend(averaged_runtimes) 
       else:
-        no_stragglers_runtime, start_finish_times = simulate.simulate(averaged_runtimes)
+        no_stragglers_runtime, start_finish_times = simulate.simulate(
+          averaged_runtimes, concurrency.get_max_concurrency(stage.tasks))
         # Adjust the start and finish times based on when the stage staged.
         start_finish_times_adjusted = [
           (start + total_no_stragglers_runtime, finish + total_no_stragglers_runtime) \
@@ -288,7 +340,7 @@ class Analyzer:
         all_start_finish_times.append(start_finish_times_adjusted)
     if len(averaged_runtimes_for_combined_stages) > 0:
       no_stragglers_runtime, start_finish_times = simulate.simulate(
-        averaged_runtimes_for_combined_stages)
+        averaged_runtimes_for_combined_stages, self.combined_stages_concurrency)
       # Adjust the start and finish times based on when the stage staged.
       # The subtraction is a hack to put the combined stages at the beginning, which
       # is when they usually occur.
@@ -335,10 +387,12 @@ class Analyzer:
           [(t.start_time, t.runtime()) for t in stage.tasks])
         num_stragglers_combined_stages += num_stragglers
       else:
+        max_concurrency = concurrency.get_max_concurrency(stage.tasks)
         no_stragglers_runtime = simulate.simulate(
-          [x[1] for x in no_straggler_start_and_runtimes])[0]
+          [x[1] for x in no_straggler_start_and_runtimes], max_concurrency)[0]
         total_no_stragglers_runtime += no_stragglers_runtime
-        original_runtime = simulate.simulate([task.runtime() for task in sorted_stage_tasks])[0]
+        original_runtime = simulate.simulate(
+          [task.runtime() for task in sorted_stage_tasks], max_concurrency)[0]
         print ("%s: Original: %s, Orig (sim): %s, no stragg: %s (%s stragglers)" %
           (id, stage.finish_time() - stage.start_time, original_runtime, no_stragglers_runtime,
            num_stragglers))
@@ -347,9 +401,11 @@ class Analyzer:
       original_finish_time = max([x[0] + x[1] for x in start_and_runtimes_for_combined_stages])
       start_and_runtimes_for_combined_stages.sort()
       runtimes_for_combined_stages = [x[1] for x in start_and_runtimes_for_combined_stages]
-      new_runtime = simulate.simulate(runtimes_for_combined_stages)[0]
+      new_runtime = simulate.simulate(
+        runtimes_for_combined_stages, self.combined_stages_concurrency)[0]
       original_runtime = simulate.simulate(
-        [x[1] for x in sorted(original_start_and_runtimes_for_combined_stages)])[0]
+        [x[1] for x in sorted(original_start_and_runtimes_for_combined_stages)],
+        self.combined_stages_concurrency)[0]
       print ("Combined: Original: %s, Orig (sim): %s, no stragg: %s (%s stragglers)" %
         (original_finish_time - original_start_time, original_runtime, new_runtime,
          num_stragglers_combined_stages))
@@ -371,9 +427,11 @@ class Analyzer:
       if id in self.stages_to_combine:
         runtimes_for_combined_stages.extend(no_straggler_runtimes)
       else:
-        total_no_stragglers_runtime += simulate.simulate(no_straggler_runtimes)[0]
+        total_no_stragglers_runtime += simulate.simulate(
+          no_straggler_runtimes, concurrency.get_max_concurrency(stage.tasks))[0]
     if len(runtimes_for_combined_stages) > 0:
-      total_no_stragglers_runtime += simulate.simulate(runtimes_for_combined_stages)[0]
+      total_no_stragglers_runtime += simulate.simulate(
+        runtimes_for_combined_stages, self.combined_stages_concurrency)[0]
     return total_no_stragglers_runtime * 1.0 / self.get_simulated_runtime()
 
   def calculate_speedup(self, description, compute_base_runtime, compute_faster_runtime):
@@ -406,14 +464,15 @@ class Analyzer:
       # Sort the tasks by the start time, not the finish time -- otherwise the longest tasks
       # end up getting run last, which can artificially inflate job completion time.
       tasks = sorted(unsorted_tasks, key = lambda task: task.start_time)
+      max_concurrency = concurrency.get_max_concurrency(tasks)
 
       # Get the runtime for the stage
       task_runtimes = [compute_base_runtime(task) for task in tasks]
-      base_runtime = simulate.simulate(task_runtimes)[0]
+      base_runtime = simulate.simulate(task_runtimes, max_concurrency)[0]
       total_time[0] += base_runtime
 
       faster_runtimes = [compute_faster_runtime(task) for task in tasks]
-      faster_runtime = simulate.simulate(faster_runtimes)[0]
+      faster_runtime = simulate.simulate(faster_runtimes, max_concurrency)[0]
       total_faster_time[0] += faster_runtime
       print "Base: %s, faster: %s" % (base_runtime, faster_runtime)
 
@@ -806,7 +865,7 @@ def parse(filename, agg_results_filename=None):
       lambda runtimes: 1.5 * numpy.percentile(runtimes, 50))
   no_stragglers_perfect_parallelism = \
     analyzer.no_stragglers_perfect_parallelism_speedup()
-  median_progress_rate_speedup = analyzer.median_progress_rate_speedup()
+  median_progress_rate_speedup = analyzer.median_progress_rate_speedup(filename)
   print (("\nSpeedup from eliminating stragglers: %s (perfect parallelism) %s (use average) "
     "%s (use median) %s (1.5=>median) %s (95%%ile=>med) %s (median progress rate)") %
     (no_stragglers_perfect_parallelism, replace_all_tasks_with_average_speedup,
@@ -821,16 +880,24 @@ def parse(filename, agg_results_filename=None):
     f = open(agg_results_filename, "a")
     data = [
       filename.split("/")[1].split("_")[0],
+      # 1
       fraction_time_waiting_on_shuffle_read,
+      # 2 3
       no_disk_speedup, fraction_time_using_disk,
       no_compute_speedup, fraction_time_serializing, fraction_time_computing,
+      # 7 8
       replace_all_tasks_with_average_speedup, no_stragglers_replace_with_median_speedup,
+      # 9 10
       no_stragglers_replace_95_with_median_speedup, no_stragglers_perfect_parallelism,
+      # 11 12
       simulated_versus_actual, median_progress_rate_speedup,
       no_input_disk_speedup, no_output_disk_speedup,
+      # 15 16
       no_shuffle_write_disk_speedup, no_shuffle_read_disk_speedup,
+      # 17 18 19
       analyzer.original_runtime(), simulated_original_runtime, no_disk_runtime, 
       no_shuffle_read_runtime,
+      # 21 22 23
       analyzer.no_gc_speedup()[0], no_network_speedup, no_network_runtime]
     analyzer.write_data_to_file(data, f)
     f.close()

@@ -13,7 +13,8 @@ class Query:
   def __init__(self, filename):
     analyzer = parse_logs.Analyzer(filename)
     self.total_input_mb = 0
-    self.total_shuffle_mb = 0
+    self.total_shuffle_write_mb = 0
+    self.total_shuffle_read_mb = 0
     self.total_output_mb = 0
     self.runtime = 0
     self.total_shuffle_time = 0
@@ -23,7 +24,8 @@ class Query:
     self.total_cpu_time = 0
     for stage in analyzer.stages.values():
       self.total_input_mb += sum([t.input_mb for t in stage.tasks])
-      self.total_shuffle_mb += sum([t.shuffle_mb_written for t in stage.tasks])
+      self.total_shuffle_write_mb += sum([t.shuffle_mb_written for t in stage.tasks])
+      self.total_shuffle_read_mb += sum([t.remote_mb_read + t.local_mb_read for t in stage.tasks if t.has_fetch])
       self.total_output_mb += sum([t.output_mb for t in stage.tasks])
       self.runtime += stage.finish_time() - stage.start_time
       self.total_shuffle_time += sum([t.fetch_wait for t in stage.tasks if t.has_fetch])
@@ -69,26 +71,26 @@ def main(argv):
       # Compute disk breakeven speed (in MB/s).
       # Shuffled data has to be written to disk and later read back, so multiply by 2.
       # Output data has to be written to 3 disks.
-      total_disk_mb = query.total_input_mb + 2 * query.total_shuffle_mb + 3 * query.total_output_mb
+      total_disk_mb = query.total_input_mb + query.total_shuffle_write_mb + query.total_shuffle_read_mb + 3 * query.total_output_mb
       # To compute the breakeven speed, need to normalize for the number of disks per machine (2) and
       # number of cores (8).
       disk_breakeven_speeds.append((total_disk_mb / 2.) / (query.total_cpu_time / (8 * 1000.)))
       print "Disk breakeven speed: %s" % disk_breakeven_speeds[-1]
 
-      if query.total_shuffle_mb > 0:
+      if query.total_shuffle_read_mb > 0:
         # Megabits / second that would result in the network time being the same as the compute time
         # for shuffle phases.
         # Multiply by 8 to account for the fact that there are 8 cores per machine.
-        reduce_breakeven_speeds.append((query.total_shuffle_mb + 2 * query.total_output_mb) * 8 * 8 /
+        reduce_breakeven_speeds.append((query.total_shuffle_read_mb + 2 * query.total_output_mb) * 8 * 8 /
           (query.total_reduce_cpu_time / 1000.))
-        print "Shuffle MB: %s, output MB: %s, total reduce compute time: %s" % (query.total_shuffle_mb,
+        print "Shuffle MB: %s, output MB: %s, total reduce compute time: %s" % (query.total_shuffle_read_mb,
           query.total_output_mb, query.total_reduce_cpu_time)
         print "Breakeven speed: %s" % reduce_breakeven_speeds[-1]
         total_breakeven_speeds.append(reduce_breakeven_speeds[-1] *
           query.total_reduce_cpu_time / query.total_cpu_time)
-        shuffle_bytes_to_input_bytes.append(query.total_shuffle_mb * 1.0 / query.total_input_mb)
+        shuffle_bytes_to_input_bytes.append(query.total_shuffle_read_mb * 1.0 / query.total_input_mb)
         shuffle_time_to_reduce_time.append(query.total_shuffle_time * 1.0 / query.total_reduce_time)
-        shuffle_time_to_total_time.append(query.total_shuffle_mb * 1.0 / query.total_runtime)
+        shuffle_time_to_total_time.append(query.total_shuffle_time * 1.0 / query.total_runtime)
 
   query_summary_filename = os.path.join(dirname, "query_breakeven_summary")
   query_summary_file = open(query_summary_filename, "w")
