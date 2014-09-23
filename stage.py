@@ -133,6 +133,19 @@ class Stage:
     "Returns stats about stragglers that can be attributed to output data size. """
     def progress_rate_based_on_output(task):
       return (task.runtime() / (task.shuffle_mb_written + task.output_mb))
+    non_zero_output_tasks = [t for t in self.get_tasks_with_non_zero_input() \
+      if t.shuffle_mb_written + t.output_mb > 0]
+    new_progress_rates = [progress_rate_based_on_output(t) \
+      for t in non_zero_output_tasks]
+    median_new_progress_rate = numpy.median(new_progress_rates)
+    attributable_stragglers = []
+    for t in self.get_progress_rate_stragglers():
+      if (t.shuffle_mb_written + t.output_mb > 0 and
+          progress_rate_based_on_output(t) < 1.5 * median_new_progress_rate):
+        attributable_stragglers.append(t)
+        t.straggler_behavior_explained = True
+    return len(attributable_stragglers), sum([t.runtime() for t in attributable_stragglers])
+
     attributable_stragglers = self.get_attributable_stragglers(progress_rate_based_on_output)
     straggler_time = sum([t.runtime() for t in attributable_stragglers])
     return len(attributable_stragglers), straggler_time
@@ -196,6 +209,11 @@ class Stage:
     return self.get_attributable_stragglers_stats(progress_rate_wo_shuffle_write)
 
   def jit_stragglers(self):
+    """ THIS SHOULD BE CALLED AFTER ALL OTHER STRAGGLER FUNCTIONS.
+
+    Tasks won't be classified as JIT stragglers if they have already
+    been classified as another kind of straggler.
+    """
     executor_to_task_finish_times = collections.defaultdict(list)
     for task in self.tasks:
       executor_to_task_finish_times[task.executor].append(task.finish_time)
@@ -211,15 +229,21 @@ class Stage:
     def progress_rate(task):
       return task.runtime() * 1.0 / task.input_size_mb()
 
+    # For JIT effects, only look at compute time (other times aren't effected by JIT).
+    def compute_progress_rate(task):
+      return task.compute_time() * 1.0 / task.input_size_mb()
+
     median_task_progress_rate = numpy.median([progress_rate(t)
       for t in self.get_tasks_with_non_zero_input()])
-    median_virgin_task_progress_rate = numpy.median([progress_rate(t) for t in virgin_tasks])
+    median_virgin_task_progress_rate = numpy.median([compute_progress_rate(t) for t in virgin_tasks])
     jit_stragglers = 0
     total_time = 0
+    print "Median virgin rate", median_virgin_task_progress_rate
     for task in virgin_tasks:
+      print compute_progress_rate(task)
       task_progress_rate = progress_rate(task)
       if task_progress_rate >= 1.5*median_task_progress_rate:
-        if task_progress_rate < 1.5*median_virgin_task_progress_rate:
+        if not task.straggler_behavior_explained and compute_progress_rate(task) < 1.5*median_virgin_task_progress_rate:
           jit_stragglers += 1
           total_time += task.runtime()
           task.straggler_behavior_explained = True

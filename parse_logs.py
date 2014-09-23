@@ -222,6 +222,7 @@ class Analyzer:
     scheduler_and_read_straggler_count = sum([x[0] for x in scheduler_and_read_stragger_info])
     scheduler_and_read_straggler_time = sum([x[1] for x in scheduler_and_read_stragger_info])
 
+    # Important that JIT stragglers be classified last!
     jit_straggler_info = [s.jit_stragglers() for s in self.stages.values()]
     jit_straggler_count = sum([x[0] for x in jit_straggler_info])
     jit_straggler_time = sum([x[1] for x in jit_straggler_info])
