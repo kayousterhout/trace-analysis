@@ -1,7 +1,9 @@
 import collections
+import json
 import numpy
-from task import Task
+
 import concurrency
+from task import Task
 
 class Stage:
   def __init__(self):
@@ -42,6 +44,11 @@ class Stage:
         max_index = i
     return "%s\n    Longest Task: %s" % (self, self.tasks[i])    
 
+  def has_shuffle_read(self):
+    total_shuffle_read_bytes = sum(
+      [t.remote_mb_read + t.local_mb_read for t in self.tasks if t.has_fetch])
+    return total_shuffle_read_bytes > 0
+
   def conservative_finish_time(self):
     # Subtract scheduler delay to account for asynchrony in the scheduler where sometimes tasks
     # aren't marked as finished until a few ms later.
@@ -61,9 +68,6 @@ class Stage:
 
   def total_time_fetching(self):
     return sum([t.total_time_fetching for t in self.tasks if t.has_fetch])
-
-  def total_disk_read_time(self):
-    return sum([t.remote_disk_read_time for t in self.tasks if t.has_fetch])
 
   def traditional_stragglers(self):
     """ Returns the total number of straggler tasks for this stage using the traditional metric.
@@ -181,9 +185,9 @@ class Stage:
     """
     def progress_rate_wo_network(task):
       return (task.runtime() - task.fetch_wait) * 1.0 / task.input_size_mb()
-    if not self.tasks[0].has_fetch:
-      # If the first task doesn't have a fetch none of them should, so there can't be any
-      # network stragglers.
+    if not self.has_shuffle_read():
+      # If the job doesn't read any shuffle data over the network, there can't be any network
+      # stragglers.
       return 0, 0
     return self.get_attributable_stragglers_stats(progress_rate_wo_network)
 
@@ -286,11 +290,9 @@ class Stage:
     total_output_size = sum([t.shuffle_mb_written for t in self.tasks])
     return total_output_size
 
-  def add_event(self, line):
-    if line.find("TASK_TYPE") == -1:
-      return
+  def add_event(self, data, is_json):
+    task = Task(data, is_json)
 
-    task = Task(line)
     if self.start_time == -1:
       self.start_time = task.start_time
     else:
