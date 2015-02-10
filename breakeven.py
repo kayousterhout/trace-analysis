@@ -12,6 +12,7 @@ import parse_logs
 class Query:
   def __init__(self, filename):
     analyzer = parse_logs.Analyzer(filename)
+    self.total_disk_input_mb = 0
     self.total_input_mb = 0
     self.total_shuffle_write_mb = 0
     self.total_shuffle_read_mb = 0
@@ -23,6 +24,7 @@ class Query:
     self.total_runtime = 0
     self.total_cpu_time = 0
     for stage in analyzer.stages.values():
+      self.total_disk_input_mb += sum([t.input_mb for t in stage.tasks if t.input_read_method != "Memory"])
       self.total_input_mb += sum([t.input_mb for t in stage.tasks])
       self.total_shuffle_write_mb += sum([t.shuffle_mb_written for t in stage.tasks])
       self.total_shuffle_read_mb += sum([t.remote_mb_read + t.local_mb_read for t in stage.tasks if t.has_fetch])
@@ -71,7 +73,7 @@ def main(argv):
       # Compute disk breakeven speed (in MB/s).
       # Shuffled data has to be written to disk and later read back, so multiply by 2.
       # Output data has to be written to 3 disks.
-      total_disk_mb = query.total_input_mb + query.total_shuffle_write_mb + query.total_shuffle_read_mb + 3 * query.total_output_mb
+      total_disk_mb = query.total_disk_input_mb + query.total_shuffle_write_mb + query.total_shuffle_read_mb + 3 * query.total_output_mb
       # To compute the breakeven speed, need to normalize for the number of disks per machine (2) and
       # number of cores (8).
       disk_breakeven_speeds.append((total_disk_mb / 2.) / (query.total_cpu_time / (8 * 1000.)))

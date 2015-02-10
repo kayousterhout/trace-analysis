@@ -28,7 +28,8 @@ class Stage:
        self.traditional_stragglers(), self.progress_rate_stragglers()[0],
        self.scheduler_delay_stragglers()[0], self.hdfs_read_stragglers()[0],
        self.hdfs_read_and_scheduler_delay_stragglers()[0], self.gc_stragglers()[0],
-       self.network_stragglers()[0], self.jit_stragglers()[0],
+       # Do not compute the JIT stragglers here! Screws up the calculation.
+       self.network_stragglers()[0], -1,
        self.output_progress_rate_stragglers()[0]))
 
   def verbose_str(self):
@@ -93,7 +94,6 @@ class Stage:
       if task.runtime() >= 1.5*median_task_duration and task.input_size_mb() > 0:
         progress_rate = task.runtime() * 1.0 / task.input_size_mb()
         if progress_rate < 1.5*median_progress_rate:
-          task.straggler_behavior_explained = True
           progress_rate_stragglers += 1
           progress_rate_stragglers_total_time += task.runtime()
     return progress_rate_stragglers, progress_rate_stragglers_total_time
@@ -259,7 +259,13 @@ class Stage:
     progress_rates = [t.runtime() * 1.0 / t.input_size_mb() for t in self.tasks
       if t.input_size_mb() > 0]
     median_progress_rate = numpy.median(progress_rates)
-    runtimes = [t.input_size_mb() * median_progress_rate for t in self.tasks]
+    def new_runtime(task):
+      if t.input_size_mb() > 0 and t.runtime() * 1.0 / t.input_size_mb() > median_progress_rate:
+        return t.input_size_mb() * median_progress_rate
+      return t.runtime()
+    runtimes = [new_runtime(t) for t in self.tasks]
+    print runtimes
+    print [t.runtime() for t in self.tasks]
     return runtimes
 
   def input_mb(self):

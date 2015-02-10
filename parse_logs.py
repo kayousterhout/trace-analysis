@@ -283,6 +283,8 @@ class Analyzer:
           for start, finish in start_finish_times]
         total_median_progress_rate_runtime += no_stragglers_runtime
         all_start_finish_times.append(start_finish_times_adjusted)
+        print "No stragglers runtime: ", no_stragglers_runtime
+        print "MAx concurrency: ", concurrency.get_max_concurrency(stage.tasks)
 
     if len(runtimes_for_combined_stages) > 0:
       no_stragglers_runtime, start_finish_times = simulate.simulate(
@@ -294,6 +296,7 @@ class Analyzer:
       all_start_finish_times.append(start_finish_times_adjusted)
 
     self.write_simulated_waterfall(all_start_finish_times, "%s_sim_median_progress_rate" % prefix)
+    print self.get_simulated_runtime
     return total_median_progress_rate_runtime * 1.0 / self.get_simulated_runtime()
 
   def no_stragglers_perfect_parallelism_speedup(self):
