@@ -32,3 +32,4 @@ horizontal line is colored by how tasks spend time. Tics on the y-axis delineate
 Here's an example waterfall:
 
 ![Waterfall example](sample_waterfall.pdf)
+![Waterfall example](sample_waterfall.jpg)
