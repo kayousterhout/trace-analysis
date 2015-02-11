@@ -13,6 +13,8 @@ the file `/tmp/spark-events` on the machine where the Spark master runs, but you
 `spark.eventLog.dir` to write the event log elsewhere (e.g., to HDFS).  See the
 [Spark configuration documentation](http://spark.apache.org/docs/1.2.1/configuration.html) for more information.
 
+These scripts are written to work with data output by Spark version 1.2.1 or later.
+
 ## Analyzing performance data
 
 After you have collected a `spark-events` file with JSON data about the job(s) you'd like to understand, run
