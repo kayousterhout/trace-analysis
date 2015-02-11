@@ -42,3 +42,11 @@ this job is that tasks in the second stage are spending a long time writing outp
 which performs poorly when writing many small files; once we upgraded to a different file system,
 the job completed much more quickly and most of the teal-colored time spent writing shuffle output
 data disappeared.
+
+## Missing data
+
+Parts of the visualization are currently inaccurate due to incomplete parts of Spark's logging.
+In particular, the HDFS read time and output write time (when writing to HDFS) are only accurate
+if you are running a special version of Spark and HDFS. Contact Kay Ousterhout if you are interested
+in doing this; otherwise, just be aware that part of the pink compute time may be spent read from
+or writing to HDFS.
