@@ -28,3 +28,7 @@ generate a waterfall depicting how time was spent by each of the tasks in the jo
 
 will create a file `spark-events_0_waterfall.pdf.  The waterfall plots each task as a horizontal line.  The
 horizontal line is colored by how tasks spend time. Tics on the y-axis delineate different stages of tasks.
+
+Here's an example waterfall:
+
+![Waterfall example](sample_waterfall.pdf)
