@@ -20,7 +20,9 @@ These scripts are written to work with data output by Spark version 1.2.1 or lat
 After you have collected a `spark-events` file with JSON data about the job(s) you'd like to understand, run
 the `parse_logs.py` script to generate a visualization of the jobs' performance:
 
-    python parse_logs.py spark-events
+    python parse_logs.py spark-events info
+
+The last parameter to the script is a logging level; pass in `debug` for more logging.
 
 For each job in the `spark-events` file, the Python script will output a gnuplot file that, when plotted, will
 generate a waterfall depicting how time was spent by each of the tasks in the job.  The plot files are named
