@@ -31,5 +31,12 @@ horizontal line is colored by how tasks spend time. Tics on the y-axis delineate
 
 Here's an example waterfall:
 
-![Waterfall example](sample_waterfall.pdf)
 ![Waterfall example](sample_waterfall.jpg)
+
+This waterfall shows the runtime of a job that has 4 stages. The first stage has 2037 tasks, the second
+stage has 100 tasks, and the final two stages each have 200 tasks. One thing that stands out for
+this job is that tasks in the second stage are spending a long time writing output data to disk
+(shown in teal). In this case, this is because the job was running on top of the ext3 file system,
+which performs poorly when writing many small files; once we upgraded to a different file system,
+the job completed much more quickly and most of the teal-colored time spent writing shuffle output
+data disappeared.
