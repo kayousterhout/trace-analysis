@@ -9,29 +9,34 @@ by setting the Spark configuration parameter `spark.eventLog.enabled` to `true`.
 causes the Spark master to write a log with information about each completed task to a file on the master. The master
 already tracks this information (much of it is displayed in Spark's web UI); setting this configuration option
 just causes the master to output all of the data for later consumption.  By default, the event log is written to
-the file `/tmp/spark-events` on the machine where the Spark master runs, but you can change the paramter
+a series of files in the folder `/tmp/spark-events/` on the machine where the Spark master runs.
+Spark creates a folder within that directory for each application, and logs are stored in a file
+named `EVENT_LOG_1` within the application's folder. You can change the parameter
 `spark.eventLog.dir` to write the event log elsewhere (e.g., to HDFS).  See the
-[Spark configuration documentation](http://spark.apache.org/docs/1.2.1/configuration.html) for more information.
+[Spark configuration documentation](http://spark.apache.org/docs/1.2.1/configuration.html) for more
+information about configuring logging.
 
 These scripts are written to work with data output by Spark version 1.2.1 or later.
 
 ## Analyzing performance data
 
-After you have collected a `spark-events` file with JSON data about the job(s) you'd like to understand, run
+After you have collected an event log file with JSON data about the job(s) you'd like to understand, run
 the `parse_logs.py` script to generate a visualization of the jobs' performance:
 
-    python parse_logs.py spark-events info
+    python parse_logs.py EVENT_LOG_1 info
 
 The last parameter to the script is a logging level; pass in `debug` for more logging.
 
-For each job in the `spark-events` file, the Python script will output a gnuplot file that, when plotted, will
-generate a waterfall depicting how time was spent by each of the tasks in the job.  The plot files are named
-`spark-events_[JOB_ID]_waterfall.gp`. To plot the waterfall for job 0, for example:
+For each job in the `EVENT_LOG_1` file, the Python script will output a gnuplot file that, when
+plotted, will generate a waterfall depicting how time was spent by each of the tasks in the job.
+The plot files are named `[INPUT_FILENAME]_[JOB_ID]_waterfall.gp`. To plot the waterfall for job 0, for
+example:
 
-    gnuplot spark-events_0_waterfall.gp
+    gnuplot EVENT_LOG_1_0_waterfall.gp
 
-will create a file `spark-events_0_waterfall.pdf.  The waterfall plots each task as a horizontal line.  The
-horizontal line is colored by how tasks spend time. Tics on the y-axis delineate different stages of tasks.
+will create a file `EVENT_LOG_1_0_waterfall.pdf.  The waterfall plots each task as a horizontal
+line.  The horizontal line is colored by how tasks spend time. Tics on the y-axis delineate
+different stages of tasks.
 
 Here's an example waterfall:
 
