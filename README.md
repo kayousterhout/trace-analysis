@@ -57,3 +57,12 @@ In particular, the HDFS read time and output write time (when writing to HDFS) a
 if you are running a special version of Spark and HDFS. Contact Kay Ousterhout if you are interested
 in doing this; otherwise, just be aware that part of the pink compute time may be spent read from
 or writing to HDFS.
+
+## FAQ
+
+If you get an error that ends with:
+
+    median_runtime = numpy.percentile(runtimes, 50)
+    AttributeError: 'module' object has no attribute 'percentile'
+
+you need to upgrade your version of `numpy` to at least 1.5.
