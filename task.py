@@ -45,6 +45,11 @@ class Task:
       shuffle_write_metrics = task_metrics[SHUFFLE_WRITE_METRICS_KEY] 
       # Convert to milliseconds (from nanoseconds).
       self.shuffle_write_time = shuffle_write_metrics["Shuffle Write Time"] / 1.0e6
+      OPEN_TIME_KEY = "Shuffle Open Time"
+      if OPEN_TIME_KEY in shuffle_write_metrics:
+        shuffle_open_time = shuffle_write_metrics[OPEN_TIME_KEY] / 1.0e6
+        print "Shuffle open time: ", shuffle_open_time
+        self.shuffle_write_time += shuffle_open_time
       self.shuffle_mb_written = shuffle_write_metrics["Shuffle Bytes Written"] / 1048576.
 
     # TODO: print warning when non-zero disk bytes spilled??

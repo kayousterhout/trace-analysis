@@ -268,8 +268,6 @@ class Stage:
         return t.input_size_mb() * median_progress_rate
       return t.runtime()
     runtimes = [new_runtime(t) for t in self.tasks]
-    print runtimes
-    print [t.runtime() for t in self.tasks]
     return runtimes
 
   def input_mb(self):
