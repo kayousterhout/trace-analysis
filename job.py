@@ -32,11 +32,11 @@ class Job:
         self.stages[stage_id].add_event(data, True)
     else:
       STAGE_ID_MARKER = "STAGE_ID="
-      stage_id_loc = line.find(STAGE_ID_MARKER)
+      stage_id_loc = data.find(STAGE_ID_MARKER)
       if stage_id_loc != -1:
-        stage_id_and_suffix = line[stage_id_loc + len(STAGE_ID_MARKER):]
+        stage_id_and_suffix = data[stage_id_loc + len(STAGE_ID_MARKER):]
         stage_id = stage_id_and_suffix[:stage_id_and_suffix.find(" ")]
-        self.stages[stage_id].add_event(line, False)
+        self.stages[stage_id].add_event(data, False)
 
   def initialize_job(self):
     """ Should be called after adding all events to the job. """
