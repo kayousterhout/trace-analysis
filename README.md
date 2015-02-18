@@ -26,7 +26,7 @@ the `parse_logs.py` script to generate a visualization of the jobs' performance:
     python parse_logs.py EVENT_LOG_1 --waterfall-only
 
 The `--waterfall-only` flag tells the script to just generate the visualization, and skip more
-complex performance analysis.
+complex performance analysis. To see all available options, use the flag `--help`.
 
 For each job in the `EVENT_LOG_1` file, the Python script will output a gnuplot file that, when
 plotted, will generate a waterfall depicting how time was spent by each of the tasks in the job.
@@ -58,6 +58,10 @@ In particular, the HDFS read time and output write time (when writing to HDFS) a
 if you are running a special version of Spark and HDFS. Contact Kay Ousterhout if you are interested
 in doing this; otherwise, just be aware that part of the pink compute time may be spent read from
 or writing to HDFS.
+
+Another problem is that the shuffle write time is currently incorrect (it doesn't include much of
+the time spent writing shuffle output) for many versions of Spark. [This Spark JIRA search](https://issues.apache.org/jira/browse/SPARK-3570?jql=project%20%3D%20SPARK%20AND%20text%20~%20%22shuffle%20write%20time%22%20AND%20reporter%20in%20(kayousterhout))
+tracks the various issues with the shuffle write time.
 
 ## FAQ
 
