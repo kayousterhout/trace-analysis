@@ -2,6 +2,7 @@ import collections
 import json
 import logging
 import numpy
+from optparse import OptionParser
 import sys
 
 from job import Job
@@ -55,6 +56,11 @@ class Analyzer:
     for job_id, job in self.jobs.iteritems():
       job.initialize_job()
       print "Job", job_id, " has stages: ", job.stages.keys()
+
+  def output_all_waterfalls(self):
+    for job_id, job in self.jobs.iteritems():
+      filename = "%s_%s" % (self.filename, job_id)
+      job.write_waterfall(filename)
 
   def output_all_job_info(self, agg_results_filename):
     for job_id, job in self.jobs.iteritems():
@@ -149,23 +155,38 @@ class Analyzer:
 
       job.write_hdfs_stage_normalized_runtimes(agg_results_filename)
 
-
 def main(argv):
-  if len(argv) < 2:
-    print "Usage: python parse_logs.py <log filename> <debug level> <(OPT) agg. results filename>"
-    sys.exit()
-
-  log_level = argv[1]
-  if log_level == "debug":
+  parser = OptionParser(usage="parse_logs.py [options] <log filename>")
+  parser.add_option(
+      "-d", "--debug", action="store_true", default=False,
+      help="Enable additional debug logging")
+  parser.add_option(
+      "-a", "--agg-results-filename",
+      help="File to which to output aggregate statistics")
+  parser.add_option(
+      "-w", "--waterfall-only", action="store_true", default=False,
+      help="Output only the visualization for each job (not other stats)")
+  (opts, args) = parser.parse_args()
+  if len(args) != 1:
+    parser.print_help()
+    sys.exit(1)
+ 
+  if opts.debug:
     logging.basicConfig(level=logging.DEBUG)
-  logging.basicConfig(level=logging.INFO)
-  filename = argv[0]
-  agg_results_filename = None
-  if len(argv) > 2:
-    agg_results_filename = argv[2]
+  else:
+    logging.basicConfig(level=logging.INFO)
+  filename = args[0]
+  if filename is None:
+    parser.print_help()
+    sys.exit(1)
+  agg_results_filename = opts.agg_results_filename
 
   analyzer = Analyzer(filename)
-  analyzer.output_all_job_info(agg_results_filename)
+
+  if opts.waterfall_only:
+    analyzer.output_all_waterfalls()
+  else:
+    analyzer.output_all_job_info(agg_results_filename)
 
 if __name__ == "__main__":
   main(sys.argv[1:])
