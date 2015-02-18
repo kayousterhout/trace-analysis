@@ -13,7 +13,7 @@ def get_json(line):
   return json.loads(line.strip("\n").replace("\n", "\\n"))
 
 class Analyzer:
-  def __init__(self, filename):
+  def __init__(self, filename, parse_as_single_job=False):
     self.filename = filename
     self.jobs = collections.defaultdict(Job)
     # For each stage, jobs that rely on the stage.
@@ -35,7 +35,10 @@ class Analyzer:
         json_data = get_json(line)
         event_type = json_data["Event"]
         if event_type == "SparkListenerJobStart":
-          job_id = json_data["Job ID"]
+          if parse_as_single_job:
+            job_id = 0
+          else:
+            job_id = json_data["Job ID"]
           stage_ids = [stage_info["Stage ID"] for stage_info in json_data["Stage Infos"]]
           print "Stage ids: %s" % stage_ids
           for stage_id in stage_ids:
@@ -166,6 +169,10 @@ def main(argv):
   parser.add_option(
       "-w", "--waterfall-only", action="store_true", default=False,
       help="Output only the visualization for each job (not other stats)")
+  parser.add_option(
+      "-s", "--parse-as-single-job", action="store_true", default=False,
+      help="Parse the log as a single job, resulting in a single waterfall plot that " +
+      "includes all tasks across all jobs")
   (opts, args) = parser.parse_args()
   if len(args) != 1:
     parser.print_help()
@@ -181,7 +188,7 @@ def main(argv):
     sys.exit(1)
   agg_results_filename = opts.agg_results_filename
 
-  analyzer = Analyzer(filename)
+  analyzer = Analyzer(filename, opts.parse_as_single_job)
 
   if opts.waterfall_only:
     analyzer.output_all_waterfalls()
