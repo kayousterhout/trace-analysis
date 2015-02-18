@@ -60,7 +60,6 @@ class Job:
     old_end = 0
     previous_id = ""
     self.stages_to_combine = set()
-    print "Start and finish times: ", start_and_finish_times
     for id, start, finish in start_and_finish_times:
       if start < old_end:
         self.overlap += old_end - start
