@@ -39,7 +39,8 @@ class Analyzer:
             job_id = 0
           else:
             job_id = json_data["Job ID"]
-          stage_ids = [stage_info["Stage ID"] for stage_info in json_data["Stage Infos"]]
+          # Avoid using "Stage Infos" here, which was added in 1.2.0.
+          stage_ids = json_data["Stage IDs"]
           print "Stage ids: %s" % stage_ids
           for stage_id in stage_ids:
             if stage_id not in self.jobs_for_stage:
