@@ -119,7 +119,7 @@ I proposed adding metrics about this to the Spark UI, but it was deemed too conf
 useful to a suffuciently broad audience (see
 discussion here: https://github.com/apache/spark/pull/2832).  If you want to understand this
 metric, you can implement the reverse of 
-this commit](https://github.com/kayousterhout/spark-1/commit/531575d381b5e4967d5b2f4385c5135040f98165)
+[this commit](https://github.com/kayousterhout/spark-1/commit/531575d381b5e4967d5b2f4385c5135040f98165)
 (which is part of the aforementioned pull request) to measure whether this time is the cause of the
 long scheduler delay.
 
