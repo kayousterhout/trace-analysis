@@ -66,7 +66,7 @@ This will result in the shuffle write time showing up as compute time.
 
 ## FAQ
 
-###I'm getting an error that says "'AttributeError: 'module' object has no attribute 'percentile'"
+####I'm getting an error that says "'AttributeError: 'module' object has no attribute 'percentile'"
 
 If you get an error that ends with:
 
@@ -75,7 +75,7 @@ If you get an error that ends with:
 
 you need to upgrade your version of `numpy` to at least 1.5.
 
-###Parts of my plot are outside of the plot area, and/or some tasks seem to be overlapping others.
+####Parts of my plot are outside of the plot area, and/or some tasks seem to be overlapping others.
 
 This typically happens when you try to plot multiple gnuplot files with one command, e.g.,
 with a command like:
@@ -85,13 +85,13 @@ with a command like:
 Gnuplot will put all of the data into a single plot, rather than in separate PDFs.  Try plotting
 each gnuplot file separately.
 
-### How can I figure out which parts of the code each stage executes?
+#### How can I figure out which parts of the code each stage executes?
 
 While a common cause of confusion in Spark, this question is unfortunately not answered by this
 tool.  Right now, the event logs don't include this information.  There have been murmurs about
 adding more detail about this to the Spark UI, but as far as I know, this hasn't been done yet.
 
-### The scheduler delay (yellow) seems to take a large amount of time. What might the cause be?
+#### The scheduler delay (yellow) seems to take a large amount of time. What might the cause be?
 
 At a very high level, usually the best way to reduce scheduler delay is to consolidate jobs into
 fewer tasks.
