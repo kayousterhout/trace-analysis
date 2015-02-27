@@ -84,6 +84,10 @@ class Job:
     """ Returns a list of all tasks. """
     return [task for stage in self.stages.values() for task in stage.tasks]
 
+  def compute_speedups(self):
+     """ Computes and saves all speedups. """
+     self.no_network_speedup_tuple = self.__no_network_speedup()
+
   def print_stage_info(self):
     for id, stage in self.stages.iteritems():
       print "STAGE %s: %s" % (id, stage.verbose_str())
@@ -534,7 +538,7 @@ class Job:
       lambda t: t.runtime(),
       lambda t: t.runtime_no_shuffle_read())
 
-  def no_network_speedup(self):
+  def __no_network_speedup(self):
     return self.calculate_speedup(
       "Computing speedup without network",
       lambda t: t.runtime(),
@@ -691,14 +695,15 @@ class Job:
       # split.
       scheduler_delay_end = start + task.scheduler_delay
       deserialize_end = scheduler_delay_end + task.executor_deserialize_time
+      broadcast_end = deserialize_end + task.broadcast_time
       # TODO: input_read_time should only be included when the task reads input data from
       # HDFS, but with the current logging it's also recorded when data is read from memory,
       # so should be included here to make the task end time line up properly.
-      hdfs_read_end = deserialize_end + task.input_read_time
+      hdfs_read_end = broadcast_end + task.input_read_time
       local_read_end = hdfs_read_end
       fetch_wait_end = hdfs_read_end
       if task.has_fetch:
-        local_read_end = deserialize_end + task.local_read_time
+        local_read_end = hdfs_read_end + task.local_read_time
         fetch_wait_end = local_read_end + task.fetch_wait
       # Here, assume GC happens as part of compute (although we know that sometimes
       # GC happens during fetch wait.
@@ -718,12 +723,13 @@ class Job:
       # Write data to plot file.
       plot_file.write(LINE_TEMPLATE % (start, i, scheduler_delay_end, i, 6))
       plot_file.write(LINE_TEMPLATE % (scheduler_delay_end, i, deserialize_end, i, 8))
+      plot_file.write(LINE_TEMPLATE % (deserialize_end, i, broadcast_end, i, 10))
       if task.has_fetch:
-        plot_file.write(LINE_TEMPLATE % (deserialize_end, i, local_read_end, i, 1))
+        plot_file.write(LINE_TEMPLATE % (broadcast_end, i, local_read_end, i, 1))
         plot_file.write(LINE_TEMPLATE % (local_read_end, i, fetch_wait_end, i, 2))
         plot_file.write(LINE_TEMPLATE % (fetch_wait_end, i, serialize_end, i, 9))
       else:
-        plot_file.write(LINE_TEMPLATE % (deserialize_end, i, hdfs_read_end, i, 7))
+        plot_file.write(LINE_TEMPLATE % (broadcast_end, i, hdfs_read_end, i, 7))
         plot_file.write(LINE_TEMPLATE % (hdfs_read_end, i, serialize_end, i, 9))
       plot_file.write(LINE_TEMPLATE % (serialize_end, i, compute_end, i, 3))
       plot_file.write(LINE_TEMPLATE % (compute_end, i, gc_end, i, 4))
@@ -741,7 +747,7 @@ class Job:
     plot_file.write(" -1 ls 8 title 'Task deserialization', -1 ls 7 title 'HDFS read',\\\n")
     plot_file.write("-1 ls 1 title 'Local read wait',\\\n")
     plot_file.write("-1 ls 2 title 'Network wait', -1 ls 3 title 'Compute', \\\n")
-    plot_file.write("-1 ls 9 title 'Data (de)serialization', -1 ls 4 title 'GC', \\\n")
+    plot_file.write("-1 ls 9 title 'Broadcast time', -1 ls 4 title 'GC', \\\n")
     plot_file.write("-1 ls 5 title 'Output write wait'\\\n")
     plot_file.close()
 

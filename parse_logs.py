@@ -5,6 +5,7 @@ import numpy
 from optparse import OptionParser
 import sys
 
+import bdb_helper
 from job import Job
 
 def get_json(line): 
@@ -19,28 +20,51 @@ class Analyzer:
     # For each stage, jobs that rely on the stage.
     self.jobs_for_stage = {}
 
+    # Drop the first run of each job.
+    parsed_query_ids = set()
+    self.first_job_ids = set()
+
     f = open(filename, "r")
     test_line = f.readline()
     try:
       get_json(test_line)
-      is_json = True
+      self.is_json = True
       print "Parsing file %s as JSON" % filename
     except:
-      is_json = False
+      self.is_json = False
       print "Parsing file %s as JobLogger output" % filename
     f.seek(0)
 
+    # Used to keep track of query 4.
+    prev_job_id = ""
     for line in f:
-      if is_json:
+      if self.is_json:
         json_data = get_json(line)
         event_type = json_data["Event"]
         if event_type == "SparkListenerJobStart":
+          stage_ids = json_data["Stage IDs"]
           if parse_as_single_job:
             job_id = 0
           else:
-            job_id = json_data["Job ID"]
+            spark_job_id = json_data["Job ID"]
+            properties = json_data["Properties"]
+            job_group_id = properties["spark.jobGroup.id"]
+            # Figure out which query this corresponds to, to nicely name the job.
+            query_id = bdb_helper.get_query_id_from_properties(properties)
+            job_id = "%s_%s" % (query_id, spark_job_id) 
+            if "FROM url_counts_partial" in properties["spark.job.description"]:
+              # Group this job with the previous one, which was also for query 4.
+              assert query_id == "4"
+              job_id = prev_job_id
+            if "3" in query_id and len(stage_ids) == 1:
+              # This is a wrap-up job that happens at the end of query 3.
+              job_id = prev_job_id
+            # Update data structures to drop the first run of each job.
+            if query_id not in parsed_query_ids:
+              parsed_query_ids.add(query_id)
+              self.first_job_ids.add(job_id)
+          prev_job_id = job_id
           # Avoid using "Stage Infos" here, which was added in 1.2.0.
-          stage_ids = json_data["Stage IDs"]
           print "Stage ids: %s" % stage_ids
           for stage_id in stage_ids:
             if stage_id not in self.jobs_for_stage:
@@ -67,11 +91,20 @@ class Analyzer:
       job.write_waterfall(filename)
 
   def output_all_job_info(self, agg_results_filename):
-    for job_id, job in self.jobs.iteritems():
-      filename = "%s_%s" % (self.filename, job_id)
-      self.__output_job_info(job, filename, agg_results_filename)
+    network_speedups = []
+    for job_id, job in sorted(self.jobs.iteritems()):
+      if job_id not in self.first_job_ids:
+        filename = "%s_%s" % (self.filename, job_id)
+        self.__output_job_info(job, job_id, filename, agg_results_filename)
+        network_speedups.append(job.no_network_speedup_tuple[0])
 
-  def __output_job_info(self, job, filename, agg_results_filename):
+    if agg_results_filename != None:
+      network_summary_file = open("%s_network_summary" % agg_results_filename, "w")
+      for percentile in [5, 25, 50, 75, 95]:
+        network_summary_file.write("%f\t" % numpy.percentile(network_speedups, percentile))
+      network_summary_file.write("\n")
+
+  def __output_job_info(self, job, job_id, filename, agg_results_filename):
     job.print_stage_info()
 
     job.write_task_write_times_scatter(filename)
@@ -79,6 +112,7 @@ class Analyzer:
     #job.make_cdfs_for_performance_model(filename)
 
     job.write_waterfall(filename)
+    job.compute_speedups()
 
     fraction_time_scheduler_delay = job.fraction_time_scheduler_delay()
     print ("\nFraction time scheduler delay: %s" % fraction_time_scheduler_delay)
@@ -96,7 +130,7 @@ class Analyzer:
     no_disk_speedup, simulated_original_runtime, no_disk_runtime = job.no_disk_speedup()
     print "No disk speedup: %s" % no_disk_speedup
     fraction_time_using_disk = job.fraction_time_using_disk()
-    no_network_speedup, not_used, no_network_runtime = job.no_network_speedup()
+    no_network_speedup, not_used, no_network_runtime = job.no_network_speedup_tuple
     print "No network speedup: %s" % no_network_speedup
     print("\nFraction of time spent writing/reading shuffle data to/from disk: %s" %
       fraction_time_using_disk)
@@ -131,8 +165,13 @@ class Analyzer:
     if agg_results_filename != None:
       print "Adding results to %s" % agg_results_filename
       f = open(agg_results_filename, "a")
+
+      if self.is_json:
+        name = job_id
+      else:
+        name = filename.split("/")[1].split("_")[0]
       data = [
-        filename.split("/")[1].split("_")[0],
+        name,
         # 1
         fraction_time_waiting_on_shuffle_read,
         # 2 3

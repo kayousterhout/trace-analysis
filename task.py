@@ -76,6 +76,11 @@ class Task:
     #if "OUTPUT_BYTES" in items_dict:
     #  self.output_mb = int(items_dict["OUTPUT_BYTES"]) / 1048576.
 
+    self.broadcast_time = 0
+    BROADCAST_KEY = "Broadcast Time"
+    if BROADCAST_KEY in task_metrics:
+      self.broadcast_time = task_metrics[BROADCAST_KEY] / 1.0e6
+
     self.has_fetch = True
     # False if the task was a map task that did not run locally with its input data.
     self.data_local = True
@@ -101,7 +106,8 @@ class Task:
     self.local_read_time = 0
     LOCAL_READ_TIME_KEY = "Local Read Time"
     if LOCAL_READ_TIME_KEY in shuffle_read_metrics:
-      self.local_read_time = shuffle_read_metrics[LOCAL_READ_TIME_KEY]
+      # Local read time is in nanoseconds in Kay's special branch.
+      self.local_read_time = shuffle_read_metrics[LOCAL_READ_TIME_KEY] / 1.0e6
     self.total_time_fetching = shuffle_read_metrics["Fetch Wait Time"]
 
   def initialize_from_job_logger(self, line):
@@ -221,7 +227,7 @@ class Task:
      Assumes shuffle writes don't get pipelined with task execution (TODO: verify this).
      Does not include GC time.
      """
-     compute_time = (self.runtime() - self.scheduler_delay - self.gc_time -
+     compute_time = (self.runtime() - self.broadcast_time - self.scheduler_delay - self.gc_time -
        self.shuffle_write_time - self.input_read_time - self.output_write_time)
      if self.has_fetch:
        # Subtract off of the time to read local data (which typically comes from disk) because
@@ -334,8 +340,9 @@ class Task:
     runtime_no_in_or_out = self.runtime_no_output()
     if not self.data_local:
       runtime_no_in_or_out -= self.input_read_time
+    runtime_no_broadcast = runtime_no_in_or_out - self.broadcast_time
     if self.has_fetch:
-      return runtime_no_in_or_out - self.fetch_wait
+      return runtime_no_broadcast - self.fetch_wait
     else:
-      return runtime_no_in_or_out
+      return runtime_no_broadcast
 
