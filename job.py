@@ -322,6 +322,7 @@ class Job:
       total_single_wave_runtime += max(original_runtimes_for_combined_stages)
       total_median_progress_rate_runtime += max(runtimes_for_combined_stages)
 
+    print "SINGLE WAVE: runtime %s, no straggler runtime: %s" % (total_single_wave_runtime, total_median_progress_rate_runtime)
     return total_median_progress_rate_runtime * 1.0 / total_single_wave_runtime
 
   def no_stragglers_perfect_parallelism_speedup(self):

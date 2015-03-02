@@ -22,10 +22,6 @@ class Analyzer:
     # For each stage, jobs that rely on the stage.
     self.jobs_for_stage = {}
 
-    # Drop the first run of each job.
-    query_counts = {}
-    self.dropped_job_ids = set()
-
     f = open(filename, "r")
     test_line = f.readline()
     try:
@@ -37,8 +33,9 @@ class Analyzer:
       print "Parsing file %s as JobLogger output" % filename
     f.seek(0)
 
-    # Used to keep track of query 4.
-    prev_job_id = ""
+    # TODO: Pass this in, so it can be replaced for other types of queries.
+    bigdb_helper = bdb_helper.BigDataBenchmarkHelper(skip_first_query)
+
     for line in f:
       if self.is_json:
         json_data = get_json(line)
@@ -50,37 +47,15 @@ class Analyzer:
           else:
             spark_job_id = json_data["Job ID"]
             properties = json_data["Properties"]
-            job_group_id = properties["spark.jobGroup.id"]
             # Figure out which query this corresponds to, to nicely name the job.
-            query_id = bdb_helper.get_query_id_from_properties(properties)
-            job_id = "%s_%s" % (query_id, spark_job_id) 
-
-            if query_id == "other":
-              self.dropped_job_ids.add(job_id)
-            elif query_id not in query_counts:
-              query_counts[query_id] = 1
-              if skip_first_query:
-                self.dropped_job_ids.add(job_id)
-            elif "FROM url_counts_partial" in properties["spark.job.description"]:
-              # Group this job with the previous one, which was also for query 4.
-              assert query_id == "4"
-              job_id = prev_job_id
-            elif "3" in query_id and len(stage_ids) <= 2:
-              # This is a wrap-up job that happens at the end of query 3.
-              print "part of prev job"
-              job_id = prev_job_id
-            else:
-              # Don't keep more than 5 trials (plus one warmup) of any query.
-              print "count for query %s (%s, #stages: %s):%s" % (query_id, properties, len(stage_ids), query_counts[query_id])
-              query_counts[query_id] += 1
-              if query_counts[query_id] > 6:
-                print "Dropping job id %s for query %s" % (job_id, query_id)
-                self.dropped_job_ids.add(job_id)
-            print "Query %s: Stage ids: %s" % (query_id, stage_ids)
-          prev_job_id = job_id
+            job_id = bigdb_helper.get_job_id_from_properties(spark_job_id, properties)
+            print "Query+Job ID %s: Stage ids: %s" % (job_id, stage_ids)
           # Avoid using "Stage Infos" here, which was added in 1.2.0.
           for stage_id in stage_ids:
-            if stage_id not in self.jobs_for_stage:
+            if not job_id:
+              # An empty job ID signals that this isn't a job we care about.
+              self.jobs_for_stage[stage_id] = []
+            elif stage_id not in self.jobs_for_stage:
               self.jobs_for_stage[stage_id] = [job_id]
             else:
               self.jobs_for_stage[stage_id].append(job_id)
@@ -119,15 +94,14 @@ class Analyzer:
     straggler_speedups = []
     single_wave_straggler_speedups = []
     for job_id, job in sorted(self.jobs.iteritems()):
-      if job_id not in self.dropped_job_ids:
-        filename = "%s_%s" % (self.filename, job_id)
-        job.compute_speedups()
-        #self.__output_job_info(job, job_id, filename, agg_results_filename)
-        network_speedups.append(job.no_network_speedup_tuple[0])
-        disk_speedups.append(job.no_disk_speedup()[0])
-        simulated_vs_actual.append(job.simulated_runtime_over_actual(filename))
-        straggler_speedups.append(job.median_progress_rate_speedup(filename))
-        single_wave_straggler_speedups.append(job.single_wave_straggler_speedup())
+      filename = "%s_%s" % (self.filename, job_id)
+      job.compute_speedups()
+      self.__output_job_info(job, job_id, filename, agg_results_filename)
+      network_speedups.append(job.no_network_speedup_tuple[0])
+      disk_speedups.append(job.no_disk_speedup()[0])
+      simulated_vs_actual.append(job.simulated_runtime_over_actual(filename))
+      straggler_speedups.append(job.median_progress_rate_speedup(filename))
+      single_wave_straggler_speedups.append(job.single_wave_straggler_speedup())
 
     if agg_results_filename != None:
       self.__write_summary_file(network_speedups, "%s_network_summary" % agg_results_filename)
@@ -142,24 +116,20 @@ class Analyzer:
   def __write_utilization_summary_file(self, utilization_pairs, filename):
     utilization_pairs.sort() 
     current_total_runtime = 0
-    percentiles = [0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 0.999]
+    percentiles = [0.05, 0.25, 0.5, 0.75, 0.95, 0.99]
     output = []
     percentile_index = 0
     # Add this up here rather than passing it in, because for some types of utilization
     # (e.g., network, disk), each task appears multiple times.
     total_runtime = sum([x[1] for x in utilization_pairs])
-    print "Max: %s" % utilization_pairs[-1][0]
     for (utilization, runtime) in utilization_pairs:
       current_total_runtime += runtime
       current_total_runtime_fraction = float(current_total_runtime) / total_runtime
       if current_total_runtime_fraction > percentiles[percentile_index]:
         output.append(utilization)
-        print "Fraction: %s, utilization: %s" % (current_total_runtime_fraction, utilization)
         percentile_index += 1
         if percentile_index >= len(percentiles):
-          print current_total_runtime, total_runtime
           break
-    print utilization_pairs 
     f = open(filename, "w")
     f.write("\t".join([str(x) for x in output]))
     f.write("\n")
@@ -174,8 +144,6 @@ class Analyzer:
     # Divide by 8 to convert to bytes!
     NETWORK_BANDWIDTH_BPS = 1.0e9 / 8
     for job_id, job in self.jobs.iteritems():
-      if job_id in self.dropped_job_ids:
-        continue
       for stage_id, stage in job.stages.iteritems():
         for task in stage.tasks:
           #print "Task %s" % task.task_id
@@ -220,13 +188,12 @@ class Analyzer:
     total_stragglers = 0
     total_explained_stragglers = 0
     for job_id, job in self.jobs.iteritems():
-      if job_id not in self.dropped_job_ids:
-        total_tasks += sum([len(s.tasks) for s in job.stages.values()])
-        all_stragglers = []
-        for s in job.stages.values():
-          all_stragglers.extend(s.get_progress_rate_stragglers())
-        total_stragglers += len(all_stragglers)
-        total_explained_stragglers += len([t for t in all_stragglers if t.straggler_behavior_explained])
+      total_tasks += sum([len(s.tasks) for s in job.stages.values()])
+      all_stragglers = []
+      for s in job.stages.values():
+        all_stragglers.extend(s.get_progress_rate_stragglers())
+      total_stragglers += len(all_stragglers)
+      total_explained_stragglers += len([t for t in all_stragglers if t.straggler_behavior_explained])
 
     f = open("%s_stragglers" % agg_results_filename, "w")
     f.write("%s\t%s\t%s\n" % (total_tasks, total_stragglers, total_explained_stragglers))

@@ -244,7 +244,6 @@ class Stage:
     total_time = 0
     print "Median virgin rate", median_virgin_task_progress_rate
     for task in virgin_tasks:
-      print compute_progress_rate(task)
       task_progress_rate = progress_rate(task)
       if task_progress_rate >= 1.5*median_task_progress_rate:
         if not task.straggler_behavior_explained and compute_progress_rate(task) < 1.5*median_virgin_task_progress_rate:

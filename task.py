@@ -87,7 +87,7 @@ class Task:
     self.input_mb = 0
     if INPUT_METRICS_KEY in task_metrics:
       input_metrics = task_metrics[INPUT_METRICS_KEY]
-      self.input_read_time = 0 # TODO: fill in once input time has been added.
+      self.input_read_time = input_metrics["Read Time Nanos"] / 1.0e6
       self.input_read_method = input_metrics["Data Read Method"]
       self.input_mb = input_metrics["Bytes Read"] / 1048576.
 

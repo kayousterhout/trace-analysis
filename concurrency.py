@@ -2,6 +2,20 @@ import math
 
 import task
 
+def get_avg_concurrency_improved(tasks):
+  """ The idea here is to take the average number of slots that were unsed,
+  until the time that the last task started. Once the last task started, the
+  number of tasks running depends on stragglers etc. so is not a valid measure
+  of how many slots the scheduler gave the stage to run. """
+  last_task_start_time = max([t.start_time for t in tasks])
+  print "Last task start time: ", last_task_start_time
+  first_start_time = min([t.start_time for t in tasks])
+  
+  total_task_time_until_last_start = sum(
+    [min(t.finish_time, last_task_start_time) - t.start_time for t in tasks])
+  return math.ceil(float(total_task_time_until_last_start) /
+    (last_task_start_time - first_start_time))
+
 def get_avg_concurrency(tasks):
   """ Returns the maximum number of tasks that were running concurrently. """
   total_task_time = sum([t.runtime() for t in tasks])
@@ -9,6 +23,7 @@ def get_avg_concurrency(tasks):
   return math.ceil(float(total_task_time) / total_time)
 
 def get_max_concurrency(tasks):
+  return get_avg_concurrency_improved(tasks)
   if len(tasks) > 40:
     # For stages with a ton of tasks, the average is more accurage. With fewer tasks, stragglers
     # can skew results, so the max is better.
