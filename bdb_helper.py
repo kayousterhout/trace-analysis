@@ -5,7 +5,7 @@ class BigDataBenchmarkHelper(object):
     self.prev_job_id = ""
     self.skip_first_query = skip_first_query
 
-  def get_job_id_from_properties(self, spark_job_id, properties):
+  def get_job_id_from_properties(self, spark_job_id, stage_ids, properties):
     job_description = properties["spark.job.description"]
     query_name = ""
     use_previous_job_id = False

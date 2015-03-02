@@ -18,7 +18,8 @@ class CpuUtilization(object):
 
   def add_task(self, task):
     if self.start_millis == -1 or task.start_cpu_utilization_millis < self.start_millis:
-      assert(self.start_jiffies == -1 or task.start_total_cpu_jiffies <= self.start_jiffies)
+# Allow small margin of error here.
+      assert(self.start_jiffies == -1 or (self.start_jiffies - task.start_total_cpu_jiffies) > -5)
       self.start_millis = task.start_cpu_utilization_millis
       self.start_jiffies = task.start_total_cpu_jiffies
 
@@ -84,7 +85,9 @@ def main(argv):
   total_breakeven_speeds = []
   disk_breakeven_speeds = []
 
-  analyzer = parse_logs.Analyzer(filename)
+
+  analyzer = parse_logs.Analyzer(filename, skip_first_query=True)
+  print [j for j in analyzer.jobs.keys()]
   for job_id, job in analyzer.jobs.iteritems():
     query = Query(job)
     non_idle_cpu_millis = query.non_idle_cpu_millis()
@@ -111,13 +114,12 @@ def main(argv):
       # Megabits / second that would result in the network time being the same as the compute time
       # for shuffle phases.
       # Multiply by 8 to account for the fact that there are 8 cores per machine.
-      print "Breakeven speed: %s" % reduce_breakeven_speeds[-1]
-      reduce_breakeven_speeds.append(reduce_breakeven_speeds[-1] *
+      reduce_breakeven_speeds.append(total_breakeven_speeds[-1] *
         non_idle_cpu_millis / query.non_idle_reduce_cpu_millis())
+      print "Breakeven speed: %s" % reduce_breakeven_speeds[-1]
       shuffle_bytes_to_input_bytes.append(query.total_shuffle_read_mb * 1.0 / query.total_input_mb)
 
-  print shuffle_bytes_to_input_bytes
-  print reduce_breakeven_speeds
+  print "Total jobs", len(total_breakeven_speeds)
   print "Total network breakeven", total_breakeven_speeds
   print "Disk breakeven", disk_breakeven_speeds
 

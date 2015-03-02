@@ -48,7 +48,7 @@ class Analyzer:
             spark_job_id = json_data["Job ID"]
             properties = json_data["Properties"]
             # Figure out which query this corresponds to, to nicely name the job.
-            job_id = bigdb_helper.get_job_id_from_properties(spark_job_id, properties)
+            job_id = bigdb_helper.get_job_id_from_properties(spark_job_id, stage_ids, properties)
             print "Query+Job ID %s: Stage ids: %s" % (job_id, stage_ids)
           # Avoid using "Stage Infos" here, which was added in 1.2.0.
           for stage_id in stage_ids:
