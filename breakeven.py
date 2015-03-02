@@ -81,6 +81,7 @@ def main(argv):
     skip_load = True
   print "Parsing queries in ", filename
   shuffle_bytes_to_input_bytes = []
+  output_bytes_to_input_bytes = []
   reduce_network_bits_per_cpu_second = []
   total_network_bits_per_cpu_second = []
   disk_bytes_per_cpu_second = []
@@ -114,7 +115,9 @@ def main(argv):
       query.total_read_estimate,
       query.total_shuffle_read_mb,
       query.total_output_mb, non_idle_cpu_millis)
-# Skip query 1. This one doesn't really do a shuffle, so doesn't make sense to include it.
+
+    output_bytes_to_input_bytes.append(query.total_output_mb * 1.0 / query.total_input_mb)
+    # Skip query 1. This one doesn't really do a shuffle, so doesn't make sense to include it.
     if query.total_shuffle_read_mb > 0 and "1a" not in job_id and "1b" not in job_id and "1c" not in job_id:
       # Megabits / second that would result in the network time being the same as the compute time
       # for shuffle phases.
@@ -124,6 +127,7 @@ def main(argv):
       print "Breakeven speed: %s" % reduce_network_bits_per_cpu_second[-1]
       shuffle_bytes_to_input_bytes.append(query.total_shuffle_read_mb * 1.0 / query.total_input_mb)
 
+  print output_bytes_to_input_bytes
   print "Total jobs", len(total_network_bits_per_cpu_second)
   print "Total network breakeven", total_network_bits_per_cpu_second
   print "Disk breakeven", disk_bytes_per_cpu_second
@@ -150,6 +154,8 @@ def main(argv):
     total_network_bits_per_cpu_second, "%s_total_network_bits_per_cpu_second" % filename)
   analyzer.write_summary_file(
     disk_bytes_per_cpu_second, "%s_disk_bytes_per_cpu_second" % filename)
+  analyzer.write_summary_file(
+    output_bytes_to_input_bytes, "%s_output_bytes_to_input_bytes" % filename)
 
 
 if __name__ == "__main__":
