@@ -81,10 +81,11 @@ def main(argv):
     skip_load = True
   print "Parsing queries in ", filename
   shuffle_bytes_to_input_bytes = []
-  reduce_breakeven_speeds = []
-  total_breakeven_speeds = []
-  disk_breakeven_speeds = []
-
+  reduce_network_bits_per_cpu_second = []
+  total_network_bits_per_cpu_second = []
+  disk_bytes_per_cpu_second = []
+  # Total non-idle cpu time used by the jobs.
+  cpu_milliseconds = []
 
   analyzer = parse_logs.Analyzer(filename, skip_first_query=True)
   print [j for j in analyzer.jobs.keys()]
@@ -92,6 +93,7 @@ def main(argv):
     query = Query(job)
     non_idle_cpu_millis = query.non_idle_cpu_millis()
     print "Elapsed cpu millis", non_idle_cpu_millis / 8.
+    cpu_milliseconds.append(non_idle_cpu_millis)
 
     # Compute disk breakeven speed (in MB/s).
     # Shuffled data has to be written to disk and later read back, so multiply by 2.
@@ -100,39 +102,55 @@ def main(argv):
       query.total_shuffle_read_mb + 3 * query.total_output_mb)
     # To compute the breakeven speed, need to normalize for the number of disks per machine (2) and
     # number of cores (8).
-    disk_breakeven_speeds.append((total_disk_mb / 2.) / (non_idle_cpu_millis / (8 * 1000.)))
-    print "Disk breakeven speed: %s" % disk_breakeven_speeds[-1]
+    disk_bytes_per_cpu_second.append(total_disk_mb / (non_idle_cpu_millis / 1000.))
+    print "Disk breakeven speed: %s" % disk_bytes_per_cpu_second[-1]
 
-    total_breakeven_speeds.append((query.total_shuffle_read_mb + 2 * query.total_output_mb) * 8 * 8 /
+    total_network_bits_per_cpu_second.append(
+      (query.total_shuffle_read_mb + 2 * query.total_output_mb) * 8 /
       (non_idle_cpu_millis / 1000.))
-    print "Input MB: %s, Estimate: %s, Shuffle MB: %s, output MB: %s, total compute time: %s" % (
+    print "Input MB: %s (disk: %s), Estimate: %s, Shuffle MB: %s, output MB: %s, total compute time: %s" % (
+      query.total_input_mb,
       query.total_disk_input_mb,
       query.total_read_estimate,
       query.total_shuffle_read_mb,
       query.total_output_mb, non_idle_cpu_millis)
-    if query.total_shuffle_read_mb > 0:
+# Skip query 1. This one doesn't really do a shuffle, so doesn't make sense to include it.
+    if query.total_shuffle_read_mb > 0 and "1a" not in job_id and "1b" not in job_id and "1c" not in job_id:
       # Megabits / second that would result in the network time being the same as the compute time
       # for shuffle phases.
       # Multiply by 8 to account for the fact that there are 8 cores per machine.
-      reduce_breakeven_speeds.append(total_breakeven_speeds[-1] *
+      reduce_network_bits_per_cpu_second.append(total_network_bits_per_cpu_second[-1] *
         non_idle_cpu_millis / query.non_idle_reduce_cpu_millis())
-      print "Breakeven speed: %s" % reduce_breakeven_speeds[-1]
+      print "Breakeven speed: %s" % reduce_network_bits_per_cpu_second[-1]
       shuffle_bytes_to_input_bytes.append(query.total_shuffle_read_mb * 1.0 / query.total_input_mb)
 
-  print "Total jobs", len(total_breakeven_speeds)
-  print "Total network breakeven", total_breakeven_speeds
-  print "Disk breakeven", disk_breakeven_speeds
+  print "Total jobs", len(total_network_bits_per_cpu_second)
+  print "Total network breakeven", total_network_bits_per_cpu_second
+  print "Disk breakeven", disk_bytes_per_cpu_second
 
-  query_summary_filename = "%s_query_breakeven_summary" % filename
+  query_summary_filename = "%s_query_breakeven_percentiles" % filename
   query_summary_file = open(query_summary_filename, "w")
   print "Writing results to", query_summary_filename
+  query_summary_file.write("Percentile\tShuffle:Input\tReduce bps\tTotal bps\tDisk Bps\tCpu millis\n")
   for i in range(1, 100):
-    query_summary_file.write("%s\t%s\t%s\t%s\t%s\n" % (
+    query_summary_file.write("%s\t%s\t%s\t%s\t%s\t%s\n" % (
       i * 1.0 / 100,
       numpy.percentile(shuffle_bytes_to_input_bytes, i),
-      numpy.percentile(reduce_breakeven_speeds, i),
-      numpy.percentile(total_breakeven_speeds, i),
-      numpy.percentile(disk_breakeven_speeds, i)))
+      numpy.percentile(reduce_network_bits_per_cpu_second, i),
+      numpy.percentile(total_network_bits_per_cpu_second, i),
+      numpy.percentile(disk_bytes_per_cpu_second, i),
+      numpy.percentile(cpu_milliseconds, i)))
+
+  # Wrtie summary files for box/whiskers plots.
+  analyzer.write_summary_file(
+    shuffle_bytes_to_input_bytes, "%s_shuffle_bytes_to_input_bytes" % filename)
+  analyzer.write_summary_file(
+    reduce_network_bits_per_cpu_second, "%s_reduce_network_bits_per_cpu_second" % filename)
+  analyzer.write_summary_file(
+    total_network_bits_per_cpu_second, "%s_total_network_bits_per_cpu_second" % filename)
+  analyzer.write_summary_file(
+    disk_bytes_per_cpu_second, "%s_disk_bytes_per_cpu_second" % filename)
+
 
 if __name__ == "__main__":
   main(sys.argv[1:])

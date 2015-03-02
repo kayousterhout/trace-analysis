@@ -80,7 +80,7 @@ class Analyzer:
       filename = "%s_%s" % (self.filename, job_id)
       job.write_waterfall(filename)
 
-  def __write_summary_file(self, values, filename):
+  def write_summary_file(self, values, filename):
     summary_file = open(filename, "w")
     for percentile in [5, 25, 50, 75, 95]:
       summary_file.write("%f\t" % numpy.percentile(values, percentile))
@@ -104,12 +104,12 @@ class Analyzer:
       single_wave_straggler_speedups.append(job.single_wave_straggler_speedup())
 
     if agg_results_filename != None:
-      self.__write_summary_file(network_speedups, "%s_network_summary" % agg_results_filename)
-      self.__write_summary_file(disk_speedups, "%s_disk_summary" % agg_results_filename)
-      self.__write_summary_file(simulated_vs_actual,
+      self.write_summary_file(network_speedups, "%s_network_summary" % agg_results_filename)
+      self.write_summary_file(disk_speedups, "%s_disk_summary" % agg_results_filename)
+      self.write_summary_file(simulated_vs_actual,
         "%s_simulation_vs_actual" % agg_results_filename)
-      self.__write_summary_file(straggler_speedups, "%s_straggler_summary" % agg_results_filename)
-      self.__write_summary_file(single_wave_straggler_speedups,
+      self.write_summary_file(straggler_speedups, "%s_straggler_summary" % agg_results_filename)
+      self.write_summary_file(single_wave_straggler_speedups,
         "%s_straggler_single_wave_summary" % agg_results_filename)
       self.output_utilizations(agg_results_filename)
 
