@@ -2,11 +2,12 @@ import sys
 
 from parse_logs import Analyzer
 
-
-def output_per_task_info(id, stage, filename):
-  f = open("%s_%s" % (filename, id), "w")
+def output_per_task_info(stage_id, job_id, stage, filename):
+  f = open("%s_details_%s_%s" % (filename, job_id, stage_id), "w")
+  f.write("Total tasks: %s\tStragglers: %s\\n" %
+    (len(stage.tasks), stage.progress_rate_stragglers()[0]))
   headers = ["Start time", "Runtime", "input size (MB)", "Progress rate", "Input read time",
-    "Fetch wait", "Compute time", "Compute w/o GC", "GC time", "Serialization time",
+    "Fetch wait", "Compute time", "Compute w/o GC", "GC time", "Broadcast time",
     "Shuffle write", "Executor", "Scheduler Delay"]
   f.write("\t".join(headers))
   f.write("\n")
@@ -28,7 +29,7 @@ def output_per_task_info(id, stage, filename):
       task.compute_time(),
       task.compute_time_without_gc(),
       task.gc_time,
-      task.estimated_serialization_millis + task.estimated_deserialization_millis,
+      task.broadcast_time,
       task.shuffle_write_time,
       task.executor,
       task.scheduler_delay,
@@ -42,8 +43,10 @@ def main(argv):
   filename = argv[0]
   analyzer = Analyzer(filename)
 
-  for id, stage in analyzer.stages.iteritems():
-    output_per_task_info(id, stage, filename)
+  for job_id, job in analyzer.jobs.iteritems():
+    if "4_" in job_id:
+      for id, stage in job.stages.iteritems():
+        output_per_task_info(id, job_id, stage, filename)
 
 if __name__ == "__main__":
   main(sys.argv[1:])

@@ -20,6 +20,7 @@ class Task:
 
     task_info = json_data["Task Info"]
     task_metrics = json_data["Task Metrics"]
+    self.task_id = task_info["Task ID"]
 
     self.start_time = task_info["Launch Time"]
     self.finish_time = task_info["Finish Time"]
@@ -33,10 +34,32 @@ class Task:
 
     # TODO: add utilization to task metrics output by JSON.
     self.disk_utilization = {}
+    DISK_UTILIZATION_KEY = "Disk Utilization"
+    if DISK_UTILIZATION_KEY in task_metrics:
+      for dic in task_metrics[DISK_UTILIZATION_KEY]:
+        for device_name, block_utilization in dic.iteritems():
+          self.disk_utilization[device_name] = (
+            block_utilization["Disk Utilization"],
+            block_utilization["Read Throughput"],
+            block_utilization["Write Throughput"])
+
     self.network_bytes_transmitted_ps = 0
     self.network_bytes_received_ps = 0
+    NETWORK_UTILIZATION_KEY = "Network Utilization"
+    if NETWORK_UTILIZATION_KEY in task_metrics:
+      network_utilization = task_metrics[NETWORK_UTILIZATION_KEY]
+      self.network_bytes_transmitted_ps = network_utilization["Bytes Transmitted Per Second"]
+      self.network_bytes_received_ps = network_utilization["Bytes Received Per Second"]
+
     self.process_cpu_utilization = 0
     self.total_cpu_utilization = 0
+    CPU_UTILIZATION_KEY = "Cpu Utilization"
+    if CPU_UTILIZATION_KEY in task_metrics:
+      cpu_utilization = task_metrics[CPU_UTILIZATION_KEY]
+      self.process_cpu_utilization = (cpu_utilization["Process User Utilization"] +
+        cpu_utilization["Process System Utilization"])
+      self.total_cpu_utilization = (cpu_utilization["Total User Utilization"] +
+        cpu_utilization["Total System Utilization"])
 
     self.shuffle_write_time = 0
     self.shuffle_mb_written = 0
@@ -48,12 +71,10 @@ class Task:
       OPEN_TIME_KEY = "Shuffle Open Time"
       if OPEN_TIME_KEY in shuffle_write_metrics:
         shuffle_open_time = shuffle_write_metrics[OPEN_TIME_KEY] / 1.0e6
-        print "Shuffle open time: ", shuffle_open_time
         self.shuffle_write_time += shuffle_open_time
       CLOSE_TIME_KEY = "Shuffle Close Time"
       if CLOSE_TIME_KEY in shuffle_write_metrics:
         shuffle_close_time = shuffle_write_metrics[CLOSE_TIME_KEY] / 1.0e6
-        print "Shuffle close time: ", shuffle_close_time
         self.shuffle_write_time += shuffle_close_time
       self.shuffle_mb_written = shuffle_write_metrics["Shuffle Bytes Written"] / 1048576.
 

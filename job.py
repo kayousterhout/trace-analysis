@@ -19,7 +19,8 @@ def write_cdf(values, filename):
   f.close()
 
 class Job:
-  def __init__(self):
+  def __init__(self, id):
+    self.id = id
     self.logger = logging.getLogger("Job")
     # Map of stage IDs to Stages.
     self.stages = collections.defaultdict(stage.Stage)
@@ -93,7 +94,7 @@ class Job:
       print "STAGE %s: %s" % (id, stage.verbose_str())
 
   def print_heading(self, text):
-    print "\n******** %s ********" % text
+    print "\n******** %s: %s ********" % (self.id, text)
 
   def get_simulated_runtime(self, waterfall_prefix=""):
     """ Returns the simulated runtime for the job.
@@ -142,9 +143,10 @@ class Job:
     actual_finish_time = max([s.finish_time() for s in self.stages.values()])
     return actual_finish_time - actual_start_time
 
-  def write_data_to_file(self, data, file_handle):
+  def write_data_to_file(self, data, file_handle, newline=True):
     stringified_data = [str(x) for x in data]
-    stringified_data += "\n"
+    if newline:
+      stringified_data += "\n"
     file_handle.write("\t".join(stringified_data))
 
   def write_hdfs_stage_normalized_runtimes(self, agg_filename_prefix):
@@ -259,7 +261,17 @@ class Job:
       output_progress_rate_straggler_count, output_progress_rate_straggler_time,
       # 29
       jit_straggler_time]
-    self.write_data_to_file(data_to_write, f)
+    self.write_data_to_file(data_to_write, f, newline=False)
+
+    f.write("\t")
+    for stage_id, stage in self.stages.iteritems():
+      stragglers = stage.get_progress_rate_stragglers()
+      straggler_time = sum([s.runtime() for s in stragglers])
+      explained_stragglers = [s for s in stragglers if s.straggler_behavior_explained]
+      explained_stragglers_time = sum([s.runtime() for s in explained_stragglers])
+      f.write("%s:(%s:%sms,%s:%sms)," %
+        (stage_id, len(stragglers), straggler_time, len(explained_stragglers), explained_stragglers_time))
+    f.write("\n")
     f.close()
 
   def median_progress_rate_speedup(self, prefix):
@@ -279,8 +291,6 @@ class Job:
           for start, finish in start_finish_times]
         total_median_progress_rate_runtime += no_stragglers_runtime
         all_start_finish_times.append(start_finish_times_adjusted)
-        print "No stragglers runtime: ", no_stragglers_runtime
-        print "MAx concurrency: ", concurrency.get_max_concurrency(stage.tasks)
 
     if len(runtimes_for_combined_stages) > 0:
       no_stragglers_runtime, start_finish_times = simulate.simulate(
@@ -293,6 +303,26 @@ class Job:
 
     self.write_simulated_waterfall(all_start_finish_times, "%s_sim_median_progress_rate" % prefix)
     return total_median_progress_rate_runtime * 1.0 / self.get_simulated_runtime()
+
+  def single_wave_straggler_speedup(self):
+    total_single_wave_runtime = 0
+    total_median_progress_rate_runtime = 0
+    original_runtimes_for_combined_stages = []
+    runtimes_for_combined_stages = []
+    for id, stage in self.stages.iteritems():
+      median_rate_runtimes = stage.task_runtimes_with_median_progress_rate()
+      if id in self.stages_to_combine:
+        runtimes_for_combined_stages.extend(median_rate_runtimes)
+        original_runtimes_for_combined_stages.extend([t.runtime() for t in stage.tasks])
+      else:
+        total_single_wave_runtime += max([t.runtime() for t in stage.tasks])
+        total_median_progress_rate_runtime += max(median_rate_runtimes)
+
+    if len(runtimes_for_combined_stages) > 0:
+      total_single_wave_runtime += max(original_runtimes_for_combined_stages)
+      total_median_progress_rate_runtime += max(runtimes_for_combined_stages)
+
+    return total_median_progress_rate_runtime * 1.0 / total_single_wave_runtime
 
   def no_stragglers_perfect_parallelism_speedup(self):
     """ Returns how fast the job would have run if time were perfectly spread across 32 slots. """

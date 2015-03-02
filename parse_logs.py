@@ -14,15 +14,17 @@ def get_json(line):
   return json.loads(line.strip("\n").replace("\n", "\\n"))
 
 class Analyzer:
-  def __init__(self, filename, parse_as_single_job=False):
+  def __init__(self, filename, parse_as_single_job=False, skip_first_query=False):
     self.filename = filename
-    self.jobs = collections.defaultdict(Job)
+    self.jobs = {}
+    if parse_as_single_job:
+      self.jobs[0] = Job("all jobs")
     # For each stage, jobs that rely on the stage.
     self.jobs_for_stage = {}
 
     # Drop the first run of each job.
-    parsed_query_ids = set()
-    self.first_job_ids = set()
+    query_counts = {}
+    self.dropped_job_ids = set()
 
     f = open(filename, "r")
     test_line = f.readline()
@@ -52,20 +54,31 @@ class Analyzer:
             # Figure out which query this corresponds to, to nicely name the job.
             query_id = bdb_helper.get_query_id_from_properties(properties)
             job_id = "%s_%s" % (query_id, spark_job_id) 
-            if "FROM url_counts_partial" in properties["spark.job.description"]:
+
+            if query_id == "other":
+              self.dropped_job_ids.add(job_id)
+            elif query_id not in query_counts:
+              query_counts[query_id] = 1
+              if skip_first_query:
+                self.dropped_job_ids.add(job_id)
+            elif "FROM url_counts_partial" in properties["spark.job.description"]:
               # Group this job with the previous one, which was also for query 4.
               assert query_id == "4"
               job_id = prev_job_id
-            if "3" in query_id and len(stage_ids) == 1:
+            elif "3" in query_id and len(stage_ids) <= 2:
               # This is a wrap-up job that happens at the end of query 3.
+              print "part of prev job"
               job_id = prev_job_id
-            # Update data structures to drop the first run of each job.
-            if query_id not in parsed_query_ids:
-              parsed_query_ids.add(query_id)
-              self.first_job_ids.add(job_id)
+            else:
+              # Don't keep more than 5 trials (plus one warmup) of any query.
+              print "count for query %s (%s, #stages: %s):%s" % (query_id, properties, len(stage_ids), query_counts[query_id])
+              query_counts[query_id] += 1
+              if query_counts[query_id] > 6:
+                print "Dropping job id %s for query %s" % (job_id, query_id)
+                self.dropped_job_ids.add(job_id)
+            print "Query %s: Stage ids: %s" % (query_id, stage_ids)
           prev_job_id = job_id
           # Avoid using "Stage Infos" here, which was added in 1.2.0.
-          print "Stage ids: %s" % stage_ids
           for stage_id in stage_ids:
             if stage_id not in self.jobs_for_stage:
               self.jobs_for_stage[stage_id] = [job_id]
@@ -75,6 +88,8 @@ class Analyzer:
           stage_id = json_data["Stage ID"]
           # Add the event to all of the jobs that depend on the stage.
           for job_id in self.jobs_for_stage[stage_id]:
+            if job_id not in self.jobs:
+              self.jobs[job_id] = Job(job_id)
             self.jobs[job_id].add_event(json_data, True)
       else:
         # The file will only contain information for one job.
@@ -90,19 +105,131 @@ class Analyzer:
       filename = "%s_%s" % (self.filename, job_id)
       job.write_waterfall(filename)
 
+  def __write_summary_file(self, values, filename):
+    summary_file = open(filename, "w")
+    for percentile in [5, 25, 50, 75, 95]:
+      summary_file.write("%f\t" % numpy.percentile(values, percentile))
+    summary_file.write("\n")
+    summary_file.close()
+
   def output_all_job_info(self, agg_results_filename):
     network_speedups = []
+    disk_speedups = []
+    simulated_vs_actual = []
+    straggler_speedups = []
+    single_wave_straggler_speedups = []
     for job_id, job in sorted(self.jobs.iteritems()):
-      if job_id not in self.first_job_ids:
+      if job_id not in self.dropped_job_ids:
         filename = "%s_%s" % (self.filename, job_id)
-        self.__output_job_info(job, job_id, filename, agg_results_filename)
+        job.compute_speedups()
+        #self.__output_job_info(job, job_id, filename, agg_results_filename)
         network_speedups.append(job.no_network_speedup_tuple[0])
+        disk_speedups.append(job.no_disk_speedup()[0])
+        simulated_vs_actual.append(job.simulated_runtime_over_actual(filename))
+        straggler_speedups.append(job.median_progress_rate_speedup(filename))
+        single_wave_straggler_speedups.append(job.single_wave_straggler_speedup())
 
     if agg_results_filename != None:
-      network_summary_file = open("%s_network_summary" % agg_results_filename, "w")
-      for percentile in [5, 25, 50, 75, 95]:
-        network_summary_file.write("%f\t" % numpy.percentile(network_speedups, percentile))
-      network_summary_file.write("\n")
+      self.__write_summary_file(network_speedups, "%s_network_summary" % agg_results_filename)
+      self.__write_summary_file(disk_speedups, "%s_disk_summary" % agg_results_filename)
+      self.__write_summary_file(simulated_vs_actual,
+        "%s_simulation_vs_actual" % agg_results_filename)
+      self.__write_summary_file(straggler_speedups, "%s_straggler_summary" % agg_results_filename)
+      self.__write_summary_file(single_wave_straggler_speedups,
+        "%s_straggler_single_wave_summary" % agg_results_filename)
+      self.output_utilizations(agg_results_filename)
+
+  def __write_utilization_summary_file(self, utilization_pairs, filename):
+    utilization_pairs.sort() 
+    current_total_runtime = 0
+    percentiles = [0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 0.999]
+    output = []
+    percentile_index = 0
+    # Add this up here rather than passing it in, because for some types of utilization
+    # (e.g., network, disk), each task appears multiple times.
+    total_runtime = sum([x[1] for x in utilization_pairs])
+    print "Max: %s" % utilization_pairs[-1][0]
+    for (utilization, runtime) in utilization_pairs:
+      current_total_runtime += runtime
+      current_total_runtime_fraction = float(current_total_runtime) / total_runtime
+      if current_total_runtime_fraction > percentiles[percentile_index]:
+        output.append(utilization)
+        print "Fraction: %s, utilization: %s" % (current_total_runtime_fraction, utilization)
+        percentile_index += 1
+        if percentile_index >= len(percentiles):
+          print current_total_runtime, total_runtime
+          break
+    print utilization_pairs 
+    f = open(filename, "w")
+    f.write("\t".join([str(x) for x in output]))
+    f.write("\n")
+    f.close()
+
+  def output_utilizations(self, prefix):
+    disk_utilizations = []
+    disk_throughputs = []
+    cpu_utilizations = []
+    network_utilizations = []
+    network_utilizations_fetch_only = []
+    # Divide by 8 to convert to bytes!
+    NETWORK_BANDWIDTH_BPS = 1.0e9 / 8
+    for job_id, job in self.jobs.iteritems():
+      if job_id in self.dropped_job_ids:
+        continue
+      for stage_id, stage in job.stages.iteritems():
+        for task in stage.tasks:
+          #print "Task %s" % task.task_id
+          cpu_utilizations.append((task.total_cpu_utilization / 8., task.runtime()))
+         # print "Cpu:", cpu_utilizations[-1]
+          for name, block_device_numbers in task.disk_utilization.iteritems():
+            if name in ["xvdb", "xvdf"]:
+              utilization = block_device_numbers[0]
+              disk_utilizations.append((utilization, task.runtime()))
+              effective_disk_throughput = 0
+              if utilization > 0:
+                effective_disk_throughput = ((block_device_numbers[1] + block_device_numbers[2]) /
+                  utilization)
+              disk_throughputs.append((effective_disk_throughput, task.runtime()))
+         #     print "Disk:", name, block_device_numbers[0]
+          received_utilization = (task.network_bytes_received_ps /
+            NETWORK_BANDWIDTH_BPS, task.runtime())
+          network_utilizations.append(received_utilization)
+          transmitted_utilization = (task.network_bytes_transmitted_ps /
+            NETWORK_BANDWIDTH_BPS, task.runtime())
+          network_utilizations.append(transmitted_utilization)
+        #  print "Network:", network_utilizations[-2:]
+          if task.has_fetch:
+            network_utilizations_fetch_only.append(received_utilization)
+            network_utilizations_fetch_only.append(transmitted_utilization)
+    
+    self.__write_utilization_summary_file(
+      disk_utilizations, "%s_%s" % (prefix, "disk_utilization"))
+    self.__write_utilization_summary_file(
+      disk_throughputs, "%s_%s" % (prefix, "disk_throughput"))
+    self.__write_utilization_summary_file(
+      network_utilizations, "%s_%s" % (prefix, "network_utilization"))
+    if network_utilizations_fetch_only:
+      self.__write_utilization_summary_file(
+        network_utilizations_fetch_only,
+        "%s_%s" % (prefix, "network_utilization_fetch_only"))
+    self.__write_utilization_summary_file(
+      cpu_utilizations, "%s_%s" % (prefix, "cpu_utilization"))
+
+  def output_straggler_info(self, agg_results_filename):
+    total_tasks = 0
+    total_stragglers = 0
+    total_explained_stragglers = 0
+    for job_id, job in self.jobs.iteritems():
+      if job_id not in self.dropped_job_ids:
+        total_tasks += sum([len(s.tasks) for s in job.stages.values()])
+        all_stragglers = []
+        for s in job.stages.values():
+          all_stragglers.extend(s.get_progress_rate_stragglers())
+        total_stragglers += len(all_stragglers)
+        total_explained_stragglers += len([t for t in all_stragglers if t.straggler_behavior_explained])
+
+    f = open("%s_stragglers" % agg_results_filename, "w")
+    f.write("%s\t%s\t%s\n" % (total_tasks, total_stragglers, total_explained_stragglers))
 
   def __output_job_info(self, job, job_id, filename, agg_results_filename):
     job.print_stage_info()
@@ -112,7 +239,6 @@ class Analyzer:
     #job.make_cdfs_for_performance_model(filename)
 
     job.write_waterfall(filename)
-    job.compute_speedups()
 
     fraction_time_scheduler_delay = job.fraction_time_scheduler_delay()
     print ("\nFraction time scheduler delay: %s" % fraction_time_scheduler_delay)
@@ -213,6 +339,9 @@ def main(argv):
       "-s", "--parse-as-single-job", action="store_true", default=False,
       help="Parse the log as a single job, resulting in a single waterfall plot that " +
       "includes all tasks across all jobs")
+  parser.add_option(
+      "--skip-first-query", action="store_true", default=False,
+      help="Skip the first run of each query (assuming that query is warmup")
   (opts, args) = parser.parse_args()
   if len(args) != 1:
     parser.print_help()
@@ -228,7 +357,7 @@ def main(argv):
     sys.exit(1)
   agg_results_filename = opts.agg_results_filename
 
-  analyzer = Analyzer(filename, opts.parse_as_single_job)
+  analyzer = Analyzer(filename, opts.parse_as_single_job, opts.skip_first_query)
 
   if opts.waterfall_only:
     analyzer.output_all_waterfalls()
