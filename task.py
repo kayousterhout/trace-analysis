@@ -22,6 +22,11 @@ class Task:
     task_metrics = json_data["Task Metrics"]
     self.task_id = task_info["Task ID"]
 
+    # TODO: remove this for when more general audience uses these scripts, since some people
+    # won't want this failure.
+    if task_metrics["Disk Bytes Spilled"] > 0:
+      assert(False, "task has spilled disk bytes! these aren't accounted for in metrics")
+
     self.start_time = task_info["Launch Time"]
     self.finish_time = task_info["Finish Time"]
     self.executor = task_info["Host"]
@@ -53,6 +58,10 @@ class Task:
 
     self.process_cpu_utilization = 0
     self.total_cpu_utilization = 0
+    self.start_total_cpu_jiffies = 0
+    self.start_cpu_utilization_millis = 0
+    self.end_total_cpu_jiffies = 0
+    self.end_cpu_utilization_millis = 0
     CPU_UTILIZATION_KEY = "Cpu Utilization"
     if CPU_UTILIZATION_KEY in task_metrics:
       cpu_utilization = task_metrics[CPU_UTILIZATION_KEY]
@@ -60,6 +69,17 @@ class Task:
         cpu_utilization["Process System Utilization"])
       self.total_cpu_utilization = (cpu_utilization["Total User Utilization"] +
         cpu_utilization["Total System Utilization"])
+
+      START_COUNTER_KEY = "Start Counters"
+      if START_COUNTER_KEY in cpu_utilization:
+        start_counters = cpu_utilization[START_COUNTER_KEY]
+        self.start_total_cpu_jiffies = (start_counters["Total User Jiffies"] +
+          start_counters["Total System Jiffies"])
+        self.start_cpu_utilization_millis = start_counters["Time Milliseconds"]
+        end_counters = cpu_utilization["End Counters"]
+        self.end_total_cpu_jiffies = (end_counters["Total User Jiffies"] +
+          end_counters["Total System Jiffies"])
+        self.end_cpu_utilization_millis = end_counters["Time Milliseconds"]
 
     self.shuffle_write_time = 0
     self.shuffle_mb_written = 0
@@ -78,7 +98,6 @@ class Task:
         self.shuffle_write_time += shuffle_close_time
       self.shuffle_mb_written = shuffle_write_metrics["Shuffle Bytes Written"] / 1048576.
 
-    # TODO: print warning when non-zero disk bytes spilled??
     # TODO: are these accounted for in shuffle metrics?
 
     INPUT_METRICS_KEY = "Input Metrics"
@@ -89,13 +108,22 @@ class Task:
       input_metrics = task_metrics[INPUT_METRICS_KEY]
       self.input_read_time = input_metrics["Read Time Nanos"] / 1.0e6
       self.input_read_method = input_metrics["Data Read Method"]
-      self.input_mb = input_metrics["Bytes Read"] / 1048576.
+      if self.input_read_method == "Hadoop":
+        # Use a special counter; Spark's estimate is wrong.
+        self.input_mb = input_metrics["Hadoop Bytes Read"] / 1048576.
+      else:
+        self.input_mb = input_metrics["Bytes Read"] / 1048576.
 
-    # TODO: add write time and MB.
-    self.output_write_time = 0 #int(items_dict["OUTPUT_WRITE_BLOCKED_NANOS"]) / 1.0e6
+    self.output_write_time = 0
     self.output_mb = 0
-    #if "OUTPUT_BYTES" in items_dict:
-    #  self.output_mb = int(items_dict["OUTPUT_BYTES"]) / 1048576.
+    OUTPUT_WRITE_KEY = "Output Write Blocked Nanos"
+    if OUTPUT_WRITE_KEY in task_metrics:
+      self.output_write_time = task_metrics[OUTPUT_WRITE_KEY] / 1.0e6
+   
+    OUTPUT_BYTES_KEY = "Output Bytes"
+    if OUTPUT_BYTES_KEY in task_metrics:
+      self.output_mb = task_metrics[OUTPUT_BYTES_KEY] / 1048576.
+    # TODO: add memory output bytes
 
     self.broadcast_time = 0
     BROADCAST_KEY = "Broadcast Time"

@@ -8,7 +8,6 @@ def get_avg_concurrency_improved(tasks):
   number of tasks running depends on stragglers etc. so is not a valid measure
   of how many slots the scheduler gave the stage to run. """
   last_task_start_time = max([t.start_time for t in tasks])
-  print "Last task start time: ", last_task_start_time
   first_start_time = min([t.start_time for t in tasks])
   
   total_task_time_until_last_start = sum(
