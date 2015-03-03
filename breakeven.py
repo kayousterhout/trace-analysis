@@ -1,4 +1,4 @@
-""" 
+""" nal
 Outputs some stuff we wanted for a 2014/08/27 meeting.
 """
 from collections import defaultdict
@@ -24,7 +24,7 @@ class CpuUtilization(object):
       self.start_jiffies = task.start_total_cpu_jiffies
 
     if task.end_cpu_utilization_millis > self.end_millis:
-      assert(task.end_total_cpu_jiffies >= self.end_jiffies)
+      assert(task.end_total_cpu_jiffies >= self.end_jiffies - 5)
       self.end_millis = task.end_cpu_utilization_millis
       self.end_jiffies = task.end_total_cpu_jiffies
 
@@ -90,9 +90,12 @@ def main(argv):
   # Total non-idle cpu time used by the jobs.
   cpu_milliseconds = []
 
-  analyzer = parse_logs.Analyzer(filename, skip_first_query=True)
+  analyzer = parse_logs.Analyzer(filename, skip_first_query=True, is_bd_bench=False,
+    multi_user_tpcds=False)
   print [j for j in analyzer.jobs.keys()]
   for job_id, job in analyzer.jobs.iteritems():
+    if "presto" in job_id:
+      continue
     query = Query(job)
     non_idle_cpu_millis = query.non_idle_cpu_millis()
     print "Elapsed cpu millis", non_idle_cpu_millis / 8.
@@ -111,7 +114,8 @@ def main(argv):
     total_network_bits_per_cpu_second.append(
       (query.total_shuffle_read_mb + 2 * query.total_disk_output_mb) * 8 /
       (non_idle_cpu_millis / 1000.))
-    print "Input MB: %s (disk: %s), Estimate: %s, Shuffle MB: %s, output MB: %s (disk: %s), total compute time: %s" % (
+    print "%s: Input MB: %s (disk: %s), Estimate: %s, Shuffle MB: %s, output MB: %s (disk: %s), total compute time: %s" % (
+      job_id,
       query.total_input_mb,
       query.total_disk_input_mb,
       query.total_read_estimate,

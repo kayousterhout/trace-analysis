@@ -14,7 +14,8 @@ def get_json(line):
   return json.loads(line.strip("\n").replace("\n", "\\n"))
 
 class Analyzer:
-  def __init__(self, filename, parse_as_single_job=False, skip_first_query=False):
+  def __init__(self, filename, parse_as_single_job=False, skip_first_query=False, is_bd_bench=False,
+               multi_user_tpcds=True):
     self.filename = filename
     self.jobs = {}
     if parse_as_single_job:
@@ -34,11 +35,16 @@ class Analyzer:
     f.seek(0)
 
     # TODO: Pass this in, so it can be replaced for other types of queries.
-    bigdb_helper = bdb_helper.BigDataBenchmarkHelper(skip_first_query)
+    if is_bd_bench:
+      bigdb_helper = bdb_helper.BigDataBenchmarkHelper(skip_first_query)
 
     for line in f:
       if self.is_json:
-        json_data = get_json(line)
+        try:
+          json_data = get_json(line)
+        except:
+          print "BAD DATA: %s" % line
+          continue
         event_type = json_data["Event"]
         if event_type == "SparkListenerJobStart":
           stage_ids = json_data["Stage IDs"]
@@ -46,10 +52,31 @@ class Analyzer:
             job_id = 0
           else:
             spark_job_id = json_data["Job ID"]
-            properties = json_data["Properties"]
-            # Figure out which query this corresponds to, to nicely name the job.
-            job_id = bigdb_helper.get_job_id_from_properties(spark_job_id, stage_ids, properties)
-            print "Query+Job ID %s: Stage ids: %s" % (job_id, stage_ids)
+            if "Properties" in json_data:
+              properties = json_data["Properties"]
+              # Figure out which query this corresponds to, to nicely name the job.
+              if is_bd_bench:
+                job_id = bigdb_helper.get_job_id_from_properties(spark_job_id, stage_ids, properties)
+              else:
+                DESCRIPTION_KEY = "spark.job.description"
+                if DESCRIPTION_KEY in properties:
+                  job_id = properties["spark.job.description"]
+                  if multi_user_tpcds:
+                    if "TPCDS-user-" not in job_id:
+                      print "Dropping job %s (since not for specific user, assumed to be from warmup" % job_id
+                      job_id = ""
+                  else:
+                    if "iteration: 1" in job_id:
+                      print "Dropping job %s, since it's not the second iteration" % job_id
+                      job_id = ""
+                else:
+                  # TODO: consider adding up all of the time for these dropped jobs to ensure low error.
+                  job_id = ""
+              if job_id:
+                print "Query+Job ID %s: Stage ids: %s" % (job_id, stage_ids)
+            else:
+              # No properties defined for the job.
+              job_id = ""
           # Avoid using "Stage Infos" here, which was added in 1.2.0.
           for stage_id in stage_ids:
             if not job_id:
@@ -84,7 +111,8 @@ class Analyzer:
     summary_file = open(filename, "w")
     for percentile in [5, 25, 50, 75, 95]:
       summary_file.write("%f\t" % numpy.percentile(values, percentile))
-    summary_file.write("\n")
+    # Write max and min
+    summary_file.write("%f\t%f\n" % (min(values), max(values)))
     summary_file.close()
 
   def output_all_job_info(self, agg_results_filename):
@@ -138,6 +166,7 @@ class Analyzer:
   def output_utilizations(self, prefix):
     disk_utilizations = []
     disk_throughputs = []
+    process_user_cpu_utilizations = []
     cpu_utilizations = []
     network_utilizations = []
     network_utilizations_fetch_only = []
@@ -148,6 +177,7 @@ class Analyzer:
         for task in stage.tasks:
           #print "Task %s" % task.task_id
           cpu_utilizations.append((task.total_cpu_utilization / 8., task.runtime()))
+          process_user_cpu_utilizations.append((task.process_user_cpu_utilization / 8., task.runtime()))
          # print "Cpu:", cpu_utilizations[-1]
           for name, block_device_numbers in task.disk_utilization.iteritems():
             if name in ["xvdb", "xvdf"]:
@@ -182,6 +212,8 @@ class Analyzer:
         "%s_%s" % (prefix, "network_utilization_fetch_only"))
     self.__write_utilization_summary_file(
       cpu_utilizations, "%s_%s" % (prefix, "cpu_utilization"))
+    self.__write_utilization_summary_file(
+      process_user_cpu_utilizations, "%s_%s" % (prefix, "cpu_process_user_utilization"))
 
   def output_straggler_info(self, agg_results_filename):
     total_tasks = 0
@@ -309,6 +341,9 @@ def main(argv):
   parser.add_option(
       "--skip-first-query", action="store_true", default=False,
       help="Skip the first run of each query (assuming that query is warmup")
+  parser.add_option(
+      "--bdbench", action="store_true", default=False,
+      help="Treat the input as coming from the big data benchmark")
   (opts, args) = parser.parse_args()
   if len(args) != 1:
     parser.print_help()
@@ -324,7 +359,7 @@ def main(argv):
     sys.exit(1)
   agg_results_filename = opts.agg_results_filename
 
-  analyzer = Analyzer(filename, opts.parse_as_single_job, opts.skip_first_query)
+  analyzer = Analyzer(filename, opts.parse_as_single_job, opts.skip_first_query, opts.bdbench)
 
   if opts.waterfall_only:
     analyzer.output_all_waterfalls()

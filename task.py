@@ -57,6 +57,7 @@ class Task:
       self.network_bytes_received_ps = network_utilization["Bytes Received Per Second"]
 
     self.process_cpu_utilization = 0
+    self.process_user_cpu_utilization = 0
     self.total_cpu_utilization = 0
     self.start_total_cpu_jiffies = 0
     self.start_cpu_utilization_millis = 0
@@ -65,7 +66,8 @@ class Task:
     CPU_UTILIZATION_KEY = "Cpu Utilization"
     if CPU_UTILIZATION_KEY in task_metrics:
       cpu_utilization = task_metrics[CPU_UTILIZATION_KEY]
-      self.process_cpu_utilization = (cpu_utilization["Process User Utilization"] +
+      self.process_user_cpu_utilization = cpu_utilization["Process User Utilization"]
+      self.process_cpu_utilization = (self.process_user_cpu_utilization +
         cpu_utilization["Process System Utilization"])
       self.total_cpu_utilization = (cpu_utilization["Total User Utilization"] +
         cpu_utilization["Total System Utilization"])
