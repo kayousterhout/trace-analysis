@@ -41,6 +41,7 @@ class Query:
     self.total_shuffle_write_mb = 0
     self.total_shuffle_read_mb = 0
     self.total_output_mb = 0
+    self.total_disk_output_mb = 0
     self.runtime = 0
     self.total_reduce_time = 0
     self.total_reduce_cpu_time = 0
@@ -55,6 +56,7 @@ class Query:
       self.total_shuffle_write_mb += sum([t.shuffle_mb_written for t in stage.tasks])
       self.total_shuffle_read_mb += sum([t.remote_mb_read + t.local_mb_read for t in stage.tasks if t.has_fetch])
       self.total_output_mb += sum([t.output_mb for t in stage.tasks])
+      self.total_disk_output_mb += sum([t.output_mb for t in stage.tasks if t.output_on_disk])
       self.runtime += stage.finish_time() - stage.start_time
       self.total_reduce_time += sum([t.runtime() for t in stage.tasks if t.has_fetch])
       self.total_runtime += sum([t.runtime() for t in stage.tasks])
@@ -100,21 +102,21 @@ def main(argv):
     # Shuffled data has to be written to disk and later read back, so multiply by 2.
     # Output data has to be written to 3 disks.
     total_disk_mb = (query.total_disk_input_mb + query.total_shuffle_write_mb +
-      query.total_shuffle_read_mb + 3 * query.total_output_mb)
+      query.total_shuffle_read_mb + 3 * query.total_disk_output_mb)
     # To compute the breakeven speed, need to normalize for the number of disks per machine (2) and
     # number of cores (8).
     disk_bytes_per_cpu_second.append(total_disk_mb / (non_idle_cpu_millis / 1000.))
     print "Disk breakeven speed: %s" % disk_bytes_per_cpu_second[-1]
 
     total_network_bits_per_cpu_second.append(
-      (query.total_shuffle_read_mb + 2 * query.total_output_mb) * 8 /
+      (query.total_shuffle_read_mb + 2 * query.total_disk_output_mb) * 8 /
       (non_idle_cpu_millis / 1000.))
-    print "Input MB: %s (disk: %s), Estimate: %s, Shuffle MB: %s, output MB: %s, total compute time: %s" % (
+    print "Input MB: %s (disk: %s), Estimate: %s, Shuffle MB: %s, output MB: %s (disk: %s), total compute time: %s" % (
       query.total_input_mb,
       query.total_disk_input_mb,
       query.total_read_estimate,
       query.total_shuffle_read_mb,
-      query.total_output_mb, non_idle_cpu_millis)
+      query.total_output_mb, query.total_disk_output_mb, non_idle_cpu_millis)
 
     output_bytes_to_input_bytes.append(query.total_output_mb * 1.0 / query.total_input_mb)
     # Skip query 1. This one doesn't really do a shuffle, so doesn't make sense to include it.

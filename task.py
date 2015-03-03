@@ -116,6 +116,7 @@ class Task:
 
     self.output_write_time = 0
     self.output_mb = 0
+    self.output_on_disk = True
     OUTPUT_WRITE_KEY = "Output Write Blocked Nanos"
     if OUTPUT_WRITE_KEY in task_metrics:
       self.output_write_time = task_metrics[OUTPUT_WRITE_KEY] / 1.0e6
@@ -123,6 +124,20 @@ class Task:
     OUTPUT_BYTES_KEY = "Output Bytes"
     if OUTPUT_BYTES_KEY in task_metrics:
       self.output_mb = task_metrics[OUTPUT_BYTES_KEY] / 1048576.
+
+    # Account for in-memory output.
+    UPDATED_BLOCKS_KEY = "Updated Blocks"
+    if UPDATED_BLOCKS_KEY in task_metrics:
+      for block in task_metrics[UPDATED_BLOCKS_KEY]:
+        status = block["Status"]
+        memory_size = block["Status"]["Memory Size"]
+        if status["Memory Size"] > 0 and self.output_on_disk:
+          assert(self.output_mb == 0)
+          self.output_on_disk = False
+        self.output_mb += memory_size / 1048576.
+        # Don't expect any tasks to write disk output.
+        assert(status["Disk Size"] == 0)
+
     # TODO: add memory output bytes
 
     self.broadcast_time = 0
