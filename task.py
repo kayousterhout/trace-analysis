@@ -24,7 +24,8 @@ class Task:
 
     # TODO: remove this for when more general audience uses these scripts, since some people
     # won't want this failure.
-    if task_metrics["Disk Bytes Spilled"] > 0:
+    DISK_BYTES_SPILLED_KEY = "Disk Bytes Spilled"
+    if DISK_BYTES_SPILLED_KEY in task_metrics and task_metrics[DISK_BYTES_SPILLED_KEY] > 0:
       assert(False, "task has spilled disk bytes! these aren't accounted for in metrics")
 
     self.start_time = task_info["Launch Time"]
@@ -108,9 +109,10 @@ class Task:
     self.input_mb = 0
     if INPUT_METRICS_KEY in task_metrics:
       input_metrics = task_metrics[INPUT_METRICS_KEY]
-      self.input_read_time = input_metrics["Read Time Nanos"] / 1.0e6
+      if "Read Time Nanos" in input_metrics:
+        self.input_read_time = input_metrics["Read Time Nanos"] / 1.0e6
       self.input_read_method = input_metrics["Data Read Method"]
-      if self.input_read_method == "Hadoop":
+      if self.input_read_method == "Hadoop" and "Hadoop Bytes Read" in input_metrics:
         # Use a special counter; Spark's estimate is wrong.
         self.input_mb = input_metrics["Hadoop Bytes Read"] / 1048576.
       else:
