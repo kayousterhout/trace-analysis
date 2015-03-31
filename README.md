@@ -51,6 +51,13 @@ which performs poorly when writing many small files; once we upgraded to a diffe
 the job completed much more quickly and most of the teal-colored time spent writing shuffle output
 data disappeared.
 
+One thing to keep in mind is that Spark does not currently include instrumentation to measure the
+time spent reading input data from disk or writing output data from disk; as a result, the time
+shown as `Compute' may include time using the disk. We have a custom Hadoop branch that measures the
+time Hadoop spends transferring data to/from disk, and we are hopeful that similar timing metrics
+will someday be included in the Hadoop FileStatistics API. In the meantime, it is not currently
+possible to understand how much of a Spark task's time is spent reading from disk via HDFS.
+
 ## Missing data
 
 Parts of the visualization are currently inaccurate due to incomplete parts of Spark's logging.

@@ -709,7 +709,7 @@ class Job:
       gc_end = compute_end + task.gc_time
       task_end = gc_end + task.shuffle_write_time + task.output_write_time
       if math.fabs((first_start + task_end) - task.finish_time) >= 0.1:
-        print "!!!!!!!!!!!!!!!!Mismatch at index %s" % i
+        print "Mismatch at index %s" % i
         print "%.1f" % (first_start + task_end)
         print task.finish_time
         print task
@@ -738,10 +738,9 @@ class Job:
 
     # Hacky way to force a key to be printed.
     plot_file.write("plot -1 ls 6 title 'Scheduler delay',\\\n")
-    plot_file.write(" -1 ls 8 title 'Task deserialization', -1 ls 7 title 'HDFS read',\\\n")
-    plot_file.write("-1 ls 1 title 'Local read wait',\\\n")
+    plot_file.write(" -1 ls 8 title 'Task deserialization', \\\n")
     plot_file.write("-1 ls 2 title 'Network wait', -1 ls 3 title 'Compute', \\\n")
-    plot_file.write("-1 ls 9 title 'Data (de)serialization', -1 ls 4 title 'GC', \\\n")
+    plot_file.write("-1 ls 4 title 'GC', \\\n")
     plot_file.write("-1 ls 5 title 'Output write wait'\\\n")
     plot_file.close()
 
