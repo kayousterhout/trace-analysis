@@ -154,6 +154,11 @@ describes how those scripts can be used. Those scripts can be used to generate
 easy-to-understand performance visualizations, as well as to generate all of the
 data that was included in our paper.
 
+We are also in the process of adding the performance visualization created by that tool
+to Spark's UI, a feature that we expect to be part of the Spark 1.4.0 release. For more
+information and to track progress of this feature, see the
+[JIRA issue](https://issues.apache.org/jira/browse/SPARK-6418).
+
 ## Contact
 
 If you have questions about this project, the performance analysis tools, or the traces,
