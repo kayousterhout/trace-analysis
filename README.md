@@ -85,7 +85,7 @@ pdfcairo by default.
 
 If you'd like a quick fix to this problem, you can just change the gnuplot file generated
 by the scripts to generate postscript output instead of pdf output.  To do this, change the
-line at the top that reads `set terminal pdfcairo ...` to instead say `set terminal postscript`,
+line at the top that reads `set terminal pdfcairo ...` to instead say `set terminal postscript ...`,
 and at the very bottom of the file, change the line that reads `set output X.pdf` to instead say
 `set output X.ps`.  This graph won't look quite as nice, but you can get a very basic version
 working.
