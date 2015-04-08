@@ -103,6 +103,11 @@ In theory, you can also use macports to install gnuplot with pdfcairo
 (described [here](http://youinfinitesnake.blogspot.com/2011/02/attractive-scientific-plots-with.html))
 but I've found that this often fails.
 
+####This graph is way too hard to read! How do I make it bigger?
+
+The first line of the gnuplot file includes a size (by default, `size 5,5`). The two coordinates
+describe the length and width; increase these to generate a larger graph.
+
 ####I'm getting an error that says "'AttributeError: 'module' object has no attribute 'percentile'"
 
 If you get an error that ends with:
