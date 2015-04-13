@@ -53,6 +53,15 @@ ext3 file system, which performs poorly when writing many small files; once we u
 the job completed much more quickly and most of the teal-colored time spent writing shuffle output
 data disappeared.
 
+Keep in mind that these plots do not depict exactly *when* a task was doing what.  For example, for
+the "Output write wait" in the above plot, each task writes output data many times during task
+execution, and not only at the very end. Spark only logs the total time spent writing output data,
+and does not log exactly when during execution tasks block writing output, because logging the
+latter would require saving significantly more information. So, the placement of where in a task's
+runtime each component of exeuction is shown in the graph is purely fictional; only the
+total amount of time spent in each part of task execution and the start and end time of the task
+is accurate.
+
 One thing to keep in mind is that Spark does not currently include instrumentation to measure the
 time spent reading input data from disk or writing job output to disk (the ``Output write wait''
 shown in the waterfall is time to write shuffle output to disk, which Spark does have
