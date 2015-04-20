@@ -13,10 +13,16 @@ a series of files in the folder `/tmp/spark-events/` on the machine where the Sp
 Spark creates a folder within that directory for each application, and logs are stored in a file
 named `EVENT_LOG_1` within the application's folder. You can change the parameter
 `spark.eventLog.dir` to write the event log elsewhere (e.g., to HDFS).  See the
-[Spark configuration documentation](http://spark.apache.org/docs/1.2.1/configuration.html) for more
+[Spark configuration documentation](http://spark.apache.org/docs/latest/configuration.html) for more
 information about configuring logging.
 
-These scripts are written to work with data output by Spark version 1.2.1 or later.
+These scripts are most accurate with more recent versions of Spark because of instrumentation
+inaccuracies that were recently fixed (e.g.,
+[SPARK-2570](https://issues.apache.org/jira/browse/SPARK-3570) was only included in 1.3.1, and fixes
+a problem where not all of the time to write shuffle files to disk was recorded). If you use these
+scripts with an older version of Spark, the compute time may include time that was actually spent
+doing I/O (in addition to the inaccuracies in compute time mentioned in the
+[Missing data](#user-content-missing-data) section).
 
 ## Analyzing performance data
 
