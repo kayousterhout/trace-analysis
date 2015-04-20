@@ -84,6 +84,14 @@ the time spent writing shuffle output) for many versions of Spark. [This Spark J
 tracks the various issues with the shuffle write time.
 This will result in the shuffle write time showing up as compute time.
 
+Finally, Spark does not currently expose metrics about the amount of time spent spilling
+intermediate data to disk.  Spilling happens when a task uses more memory than is available on the
+machine, so needs to temporarily store intermediate data on disk. You can tell if your tasks are
+spilling because the stage page in Spark's UI reports the bytes spilled to disk by each task.
+Until a fix for [SPARK-3577](https://issues.apache.org/jira/browse/SPARK-3577) is merged, spill
+time is not logged by Spark tasks, so time spent spilling data to disk will show up as compute
+time.
+
 ## FAQ
 
 #### How do I upgrade my version of gnuplot to support generating PDF output?
