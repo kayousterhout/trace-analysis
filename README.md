@@ -83,7 +83,9 @@ Parts of the visualization are currently inaccurate due to incomplete parts of S
 In particular, the HDFS read time and output write time (when writing to HDFS) are only accurate
 if you are running a special version of Spark and HDFS. Contact Kay Ousterhout if you are interested
 in doing this; otherwise, just be aware that part of the pink compute time may be spent read from
-or writing to HDFS.
+or writing to HDFS. (In the future, we're hoping that this time will be exposed in the default
+metrics reported by HDFS; see [HADOOP-11873](https://issues.apache.org/jira/browse/HADOOP-11873)
+to track progress on adding such metrics.)
 
 Another problem is that the shuffle write time is currently incorrect (it doesn't include much of
 the time spent writing shuffle output) for many versions of Spark. [This Spark JIRA search](https://issues.apache.org/jira/browse/SPARK-3570?jql=project%20%3D%20SPARK%20AND%20text%20~%20%22shuffle%20write%20time%22%20AND%20reporter%20in%20(kayousterhout))
