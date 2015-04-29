@@ -42,7 +42,7 @@ class Task:
     self.disk_utilization = {}
     DISK_UTILIZATION_KEY = "Disk Utilization"
     if DISK_UTILIZATION_KEY in task_metrics:
-      for dic in task_metrics[DISK_UTILIZATION_KEY]:
+      for dic in task_metrics[DISK_UTILIZATION_KEY]["Device Name To Utilization"]:
         for device_name, block_utilization in dic.iteritems():
           self.disk_utilization[device_name] = (
             block_utilization["Disk Utilization"],
