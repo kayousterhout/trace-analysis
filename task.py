@@ -81,7 +81,7 @@ class Task:
     self.data_local = True
     SHUFFLE_READ_METRICS_KEY = "Shuffle Read Metrics"
     if SHUFFLE_READ_METRICS_KEY not in task_metrics:
-      if task_info["Locality"] != "NODE_LOCAL":
+      if (task_info["Locality"] != "NODE_LOCAL") && (task_info["Locality"] != "PROCESS_LOCAL"):
         self.data_local = False
       self.has_fetch = False
       return
