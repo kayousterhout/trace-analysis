@@ -121,6 +121,15 @@ gnuplot with pdfcairo enabled:
 
     brew install gnuplot --cairo --pdf --tutorial
 
+For linux users, recommend to uninstall your current version of gnuplot and then install gnuplot-5.0.1 with cairo:
+
+    Download gnuplot-5 from [here](http://www.gnuplot.info/download.html)
+    tar -zxf gnuplot-5.0.1.tar.gz
+    cd gnuplot-5.0.1
+    ./configure --with-cairo
+    make
+    make install
+
 I've found that trying to upgrade existing versions of gnuplot to include pdfcairo is much more
 difficult than just re-installing gnuplot.
 
