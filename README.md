@@ -1,5 +1,10 @@
 # Understanding Spark Performance
 
+*NOTE: These scripts are now deprecated, because the information that they show is now part of
+Apache Spark's UI. To view how each task in a stage spent its time, click on the stage detail page
+in the Spark UI, and then click "Event timeline". This will display a (much nicer-looking version of)
+the the plot output by the scripts here.*
+
 This repository contains scripts to understand the performance of jobs run with [Apache Spark](https://spark.apache.org/).
 
 ## Configuring Spark to log performance data
