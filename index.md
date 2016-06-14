@@ -148,7 +148,7 @@ The modified version runs a subset of 20 queries selected by an
 
 ## Performance Visualization
 
-To understand Apache Spark's performance, I wrote a suite of visualization tools.  Those tools are
+To understand Apache Spark's performance, I wrote a <a href="https://github.com/kayousterhout/trace-analysis">suite of visualization tools</a>.  Those tools are
 now deprecated, because the visualization is now part of Spark's UI.  You can visualize how the
 tasks in a stage are spending their time, click on the detail page for a particular stage, and
 then click on the "Event Timeline" link. The UI will display a timeline like this:
