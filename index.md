@@ -148,16 +148,16 @@ The modified version runs a subset of 20 queries selected by an
 
 ## Performance Visualization
 
-A suite of visualization tools that you can use to understand Spark's performance are publicly
-available [here](https://github.com/kayousterhout/trace-analysis).  The README on that page
-describes how those scripts can be used. Those scripts can be used to generate 
-easy-to-understand performance visualizations, as well as to generate all of the
-data that was included in our paper.
+To understand Apache Spark's performance, I wrote a suite of visualization tools.  Those tools are
+now deprecated, because the visualization is now part of Spark's UI.  You can visualize how the
+tasks in a stage are spending their time, click on the detail page for a particular stage, and
+then click on the "Event Timeline" link. The UI will display a timeline like this:
 
-We are also in the process of adding the performance visualization created by that tool
-to Spark's UI, a feature that we expect to be part of the Spark 1.4.0 release. For more
-information and to track progress of this feature, see the
-[JIRA issue](https://issues.apache.org/jira/browse/SPARK-6418).
+![Event Timeline](https://databricks.com/wp-content/uploads/2015/06/Screen-Shot-2015-06-19-at-1.57.36-PM-1024x823.png)
+
+(credit to the
+<a href="https://databricks.com/blog/2015/06/22/understanding-your-spark-application-through-visualization.html">Databricks Blog</a>
+for this screenshot) that shows the breakdown of time for each task. 
 
 ## Contact
 
