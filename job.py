@@ -732,8 +732,8 @@ class Job:
       plot_file.write(LINE_TEMPLATE % (compute_end, i, gc_end, i, 4))
       plot_file.write(LINE_TEMPLATE % (gc_end, i, shuffle_write_end, i, 10))
       plot_file.write(LINE_TEMPLATE % (shuffle_write_end, i, task_output_end, i, 5))
-      #plot_file.write(LINE_TEMPLATE % (gc_end, i, task_end, i, 5))
-      #plot_file.write(LINE_TEMPLATE % (x, i, x, i, x))
+      # plot_file.write(LINE_TEMPLATE % (gc_end, i, task_end, i, 5))
+      # plot_file.write(LINE_TEMPLATE % (x, i, x, i, x))
 
     last_end = max([t.finish_time for t in all_tasks])
     ytics_str = ",".join(stage_cumulative_tasks)
@@ -745,7 +745,8 @@ class Job:
     # Hacky way to force a key to be printed.
     plot_file.write("plot -1 ls 6 title 'Scheduler delay',\\\n")
     plot_file.write(" -1 ls 8 title 'Task deserialization', \\\n")
-    plot_file.write("-1 ls 2 title 'Network wait', -1 ls 3 title 'Compute', \\\n")
+    plot_file.write("-1 ls 2 title 'Shuffle read', -1 ls 3 title 'Compute', \\\n")
+    # plot_file.write("-1 ls 2 title 'Network wait', -1 ls 3 title 'Compute', \\\n")
     plot_file.write("-1 ls 4 title 'GC', \\\n")
     plot_file.write("-1 ls 10 title 'Shuffle write', \\\n")
     plot_file.write("-1 ls 5 title 'Getting result'\\\n")
