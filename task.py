@@ -67,7 +67,10 @@ class Task:
     if INPUT_METRICS_KEY in task_metrics:
       input_metrics = task_metrics[INPUT_METRICS_KEY]
       self.input_read_time = 0 # TODO: fill in once input time has been added.
-      self.input_read_method = "Hadoop" # for Spark 2.0.0
+      if input_metrics["Data Read Method"]:
+        self.input_read_method = input_metrics["Data Read Method"]
+      else:
+        self.input_read_method = "Hadoop" # TODO: fit Spark 2.0
       self.input_mb = input_metrics["Bytes Read"] / 1048576.
 
     # TODO: add write time and MB.
